@@ -23,9 +23,6 @@ type Message struct {
 	// Flags are the MessageFlags.
 	Flags MessageFlags `json:"flags"`
 
-	// The message associated with the message_reference. This is a minimal subset of fields in a message (e.g. author is excluded.)
-	MessageSnapshots []MessageSnapshot `json:"message_snapshots,omitempty"`
-
 	// TTS specifies whether the was a TTS message.
 	TTS bool `json:"tts"`
 	// Pinned specifies whether the message is pinned.
@@ -103,7 +100,17 @@ type Message struct {
 	// the type is InlinedReplyMessage, the backend couldn't fetch the
 	// replied-to message. If null, the message was deleted. If present and
 	// non-null, it is a message object
+	//
+	// This field is only populated if Reference.Type is
+	// [MessageReferenceTypeDefault].
 	ReferencedMessage *Message `json:"referenced_message,omitempty"`
+	// MessageSnapshots contains the messages associated with the
+	// message_reference. This is a minimal subset of fields in a message (e.g.
+	// author is excluded.)
+	//
+	// This field is only populated if Reference.Type is
+	// [MessageReferenceTypeForward].
+	MessageSnapshots []MessageSnapshot `json:"message_snapshots,omitempty"`
 
 	// Interaction is the interaction that the message is in response to.
 	// This is only present if the message is in response to an interaction.
@@ -414,18 +421,23 @@ type MessageSnapshotMessage struct {
 // https://discord.com/developers/docs/resources/message#message-snapshot-object
 type MessageSnapshot struct {
 	// The embedded partial message object
-	Message *MessageSnapshotMessage `json:"message"`
+	Message MessageSnapshotMessage `json:"message"`
 }
-
-const (
-	// A standard reference used by replies.
-	MessageReferenceTypeDefault MessageReferenceType = iota
-	// Reference used to point to a message at a point in time.
-	MessageReferenceTypeForward
-)
 
 // Type of message reference
 type MessageReferenceType int
+
+const (
+	// MessageReferenceTypeDefault is the type for a standard reference used by
+	// replies.
+	// It populates the ReferencedMessage field in [Message].
+	MessageReferenceTypeDefault MessageReferenceType = iota
+	// MessageReferenceTypeForward is the type for a reference used to point to
+	// a message at a point in time.
+	// It populates the MessageSnapshots field in [Message].
+	MessageReferenceTypeForward
+)
+
 
 // MessageReference is used in four situations:
 //
@@ -458,8 +470,8 @@ type MessageReferenceType int
 // When sending, only MessageID is required.
 // https://discord.com/developers/docs/resources/channel#message-object-message-reference-structure
 type MessageReference struct {
-	// If type is unset, DEFAULT can be assumed in order to match the behaviour before message reference
-	// had types. In future API versions this will become a required field.
+	// Type describes whether MessageSnapshots or ReferencedMessage will be
+	// populated in [Message].
 	Type MessageReferenceType `json:"type"`
 	// MessageID is the id of the originating message.
 	MessageID MessageID `json:"message_id,omitempty"`
