@@ -22,7 +22,7 @@ jobs:
 
       - name: Generate
         run: |
-          go generate ./...
+          nix develop -c go generate ./...
 
           if ! git diff --exit-code; then
             if [[ $GITHUB_REF == refs/heads/main ]]; then
@@ -35,7 +35,6 @@ jobs:
           fi
         env:
           GITHUB_REF: ${{ github.ref }}
-        shell: nix develop -c {0}
 
   build:
     name: Build
