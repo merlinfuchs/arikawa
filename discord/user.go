@@ -3,6 +3,8 @@ package discord
 import (
 	"strconv"
 	"time"
+
+	"github.com/diamondburned/arikawa/v3/utils/json/option"
 )
 
 type User struct {
@@ -251,9 +253,11 @@ type ActivitySecrets struct {
 // A Relationship between the logged in user and the user in the struct. This
 // struct is undocumented.
 type Relationship struct {
-	UserID UserID           `json:"id"`
-	User   User             `json:"user"`
-	Type   RelationshipType `json:"type"`
+	UserID   UserID           `json:"id"`
+	User     User             `json:"user"`
+	Type     RelationshipType `json:"type"`
+	Since    Timestamp        `json:"since,omitempty"`
+	Nickname option.String    `json:"nickname"`
 }
 
 // RelationshipType is an enum for a relationship.
