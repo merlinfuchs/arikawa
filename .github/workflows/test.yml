@@ -11,6 +11,10 @@ on:
         default: false
         type: boolean
 
+defaults:
+  run:
+    shell: nix develop -c bash -e {0}
+
 jobs:
   generate:
     name: Generate
@@ -22,7 +26,7 @@ jobs:
 
       - name: Generate
         run: |
-          nix develop -c go generate ./...
+          go generate ./...
 
           if ! git diff --exit-code; then
             if [[ $GITHUB_REF == refs/heads/main ]]; then
@@ -47,7 +51,6 @@ jobs:
 
       - name: Build
         run: go build -v ./...
-        shell: nix develop -c {0}
 
   unit-test:
     name: Unit Test
@@ -63,7 +66,6 @@ jobs:
         env:
           TEST_FLAGS: >-
             -v=${{ runner.debug && '1' || '0' }}
-        shell: nix develop -c {0}
 
   integration-test:
     name: Integration Test
@@ -87,7 +89,6 @@ jobs:
           GUILD_ID: ${{ secrets.GUILD_ID }}
           VOICE_ID: ${{ secrets.VOICE_ID }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        shell: nix develop -c {0}
 
       - name: Upload coverage profile
         uses: actions/upload-artifact@v3
