@@ -12,24 +12,13 @@ on:
         type: boolean
 
 jobs:
-  nix-env:
-    name: Initialize Nix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Install Nix packages
-        uses: diamondburned/cache-install@main
-
   generate:
     name: Generate
-    needs: [nix-env]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Install Nix packages
-        uses: diamondburned/cache-install@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Generate
         run: |
@@ -46,35 +35,36 @@ jobs:
           fi
         env:
           GITHUB_REF: ${{ github.ref }}
+        shell: nix develop -c {0}
 
   build:
     name: Build
     runs-on: ubuntu-latest
     needs: [generate]
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Install Nix packages
-        uses: diamondburned/cache-install@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Build
-        run: go build ./...
+        run: go build -v ./...
+        shell: nix develop -c {0}
 
   unit-test:
     name: Unit Test
     runs-on: ubuntu-latest
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Install Nix packages
-        uses: diamondburned/cache-install@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Test
         run: go test $TEST_FLAGS ./...
         env:
           TEST_FLAGS: >-
             -v=${{ runner.debug && '1' || '0' }}
+        shell: nix develop -c {0}
 
   integration-test:
     name: Integration Test
@@ -82,10 +72,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Install Nix packages
-        uses: diamondburned/cache-install@main
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Test
         run: |
@@ -99,6 +88,7 @@ jobs:
           GUILD_ID: ${{ secrets.GUILD_ID }}
           VOICE_ID: ${{ secrets.VOICE_ID }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        shell: nix develop -c {0}
 
       - name: Upload coverage profile
         uses: actions/upload-artifact@v3
