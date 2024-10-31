@@ -720,6 +720,8 @@ type UserSelectComponent struct {
 	ValueLimits [2]int `json:"-"`
 	// Disabled disables the select if true.
 	Disabled bool `json:"disabled,omitempty"`
+	// DefaultUsers is the slice of UserIDs that are marked as selected by default
+	DefaultUsers []UserID `json:"-"`
 }
 
 // ID implements the Component interface.
@@ -737,17 +739,33 @@ func (s *UserSelectComponent) _icp() {}
 func (s *UserSelectComponent) MarshalJSON() ([]byte, error) {
 	type sel UserSelectComponent
 
+	type DefaultValue struct {
+		Id UserID `json:"id"`
+		Type string `json:"type"`
+	}
+
 	type Msg struct {
 		Type ComponentType `json:"type"`
 		*sel
 		MinValues *int `json:"min_values,omitempty"`
 		MaxValues *int `json:"max_values,omitempty"`
+		DefaultValues []DefaultValue `json:"default_values,omitempty"`
 	}
 
 	msg := Msg{
 		Type: UserSelectComponentType,
 		sel:  (*sel)(s),
 	}
+
+	var defaultValues []DefaultValue
+
+	if len(s.DefaultUsers) > 0 {
+		for _, userId := range s.DefaultUsers {
+			defaultValues = append(defaultValues, DefaultValue{Id: userId, Type: "user"})
+		}
+	}
+
+	msg.DefaultValues = defaultValues
 
 	if s.ValueLimits != [2]int{0, 0} {
 		msg.MinValues = new(int)
@@ -771,6 +789,8 @@ type RoleSelectComponent struct {
 	ValueLimits [2]int `json:"-"`
 	// Disabled disables the select if true.
 	Disabled bool `json:"disabled,omitempty"`
+	// DefaultRoles is the slice of RoleIDs that are marked as selected by default
+	DefaultRoles []RoleID `json:"-"`
 }
 
 // ID implements the Component interface.
@@ -788,17 +808,33 @@ func (s *RoleSelectComponent) _icp() {}
 func (s *RoleSelectComponent) MarshalJSON() ([]byte, error) {
 	type sel RoleSelectComponent
 
+	type DefaultValue struct {
+		Id RoleID `json:"id"`
+		Type string `json:"type"`
+	}
+
 	type Msg struct {
 		Type ComponentType `json:"type"`
 		*sel
 		MinValues *int `json:"min_values,omitempty"`
 		MaxValues *int `json:"max_values,omitempty"`
+		DefaultValues []DefaultValue `json:"default_values,omitempty"`
 	}
 
 	msg := Msg{
 		Type: RoleSelectComponentType,
 		sel:  (*sel)(s),
 	}
+
+	var defaultValues []DefaultValue
+
+	if len(s.DefaultRoles) > 0 {
+		for _, roleId := range s.DefaultRoles {
+			defaultValues = append(defaultValues, DefaultValue{Id: roleId, Type: "role"})
+		}
+	}
+
+	msg.DefaultValues = defaultValues
 
 	if s.ValueLimits != [2]int{0, 0} {
 		msg.MinValues = new(int)
@@ -809,6 +845,22 @@ func (s *RoleSelectComponent) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(msg)
+}
+
+// DefaultMention type is a Union type which packs both UserID and RoleID
+type DefaultMention struct {
+	userId UserID `json:"-"`
+	roleId RoleID `json:"-"`
+}
+
+// DefaultUserMention creates a new DefaultMention type with only UserID
+func DefaultUserMention (userId UserID) DefaultMention {
+	return DefaultMention{userId: userId}
+}
+
+// DefaultRoleMention creates a new DefaultMention type with only RoleID
+func DefaultRoleMention(roleId RoleID) DefaultMention {
+	return DefaultMention{roleId: roleId}
 }
 
 type MentionableSelectComponent struct {
@@ -822,6 +874,14 @@ type MentionableSelectComponent struct {
 	ValueLimits [2]int `json:"-"`
 	// Disabled disables the select if true.
 	Disabled bool `json:"disabled,omitempty"`
+	// DefaultMentions is the slice of User / Role Mentions that are selected by default
+	// Example:
+	//     DefaultMentions: []DefaultMention{ 
+	//         discord.DefaultUserMention(0382080830233), 
+	// 	       discord.DefaultRoleMention(4820380382080),
+	//         ...
+	//     }
+	DefaultMentions []DefaultMention `json:"-"`
 }
 
 // ID implements the Component interface.
@@ -839,17 +899,40 @@ func (s *MentionableSelectComponent) _icp() {}
 func (s *MentionableSelectComponent) MarshalJSON() ([]byte, error) {
 	type sel MentionableSelectComponent
 
+	type DefaultValue struct {
+		Id Snowflake `json:"id"`
+		Type string `json:"type"`
+	}
+
 	type Msg struct {
 		Type ComponentType `json:"type"`
 		*sel
 		MinValues *int `json:"min_values,omitempty"`
 		MaxValues *int `json:"max_values,omitempty"`
+		DefaultValues []DefaultValue `json:"default_values,omitempty"`
 	}
 
 	msg := Msg{
 		Type: MentionableSelectComponentType,
 		sel:  (*sel)(s),
 	}
+
+	var defaultValues []DefaultValue
+
+	if len(s.DefaultMentions) > 0 {
+		for _, mention := range s.DefaultMentions {
+			if mention.userId.IsValid() {
+				defaultValues = 
+					append(defaultValues, DefaultValue{Id: Snowflake(mention.userId), Type: "user"})
+			}
+			if mention.roleId.IsValid() {
+				defaultValues = 
+					append(defaultValues, DefaultValue{Id: Snowflake(mention.roleId), Type: "role"})
+			}
+		}
+	}
+
+	msg.DefaultValues = defaultValues
 
 	if s.ValueLimits != [2]int{0, 0} {
 		msg.MinValues = new(int)
@@ -875,6 +958,8 @@ type ChannelSelectComponent struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// ChannelTypes is the types of channels that can be chosen from.
 	ChannelTypes []ChannelType `json:"channel_types,omitempty"`
+	// DefaultChannels is the list of channels that are marked as selected by default.
+	DefaultChannels []ChannelID `json:"-"`
 }
 
 // ID implements the Component interface.
@@ -892,17 +977,33 @@ func (s *ChannelSelectComponent) _icp() {}
 func (s *ChannelSelectComponent) MarshalJSON() ([]byte, error) {
 	type sel ChannelSelectComponent
 
+	type DefaultValue struct {
+		Id ChannelID `json:"id"`
+		Type string `json:"type"`
+	}
+
 	type Msg struct {
 		Type ComponentType `json:"type"`
 		*sel
 		MinValues *int `json:"min_values,omitempty"`
 		MaxValues *int `json:"max_values,omitempty"`
+		DefaultValues []DefaultValue `json:"default_values,omitempty"`
 	}
 
 	msg := Msg{
 		Type: ChannelSelectComponentType,
 		sel:  (*sel)(s),
 	}
+
+	var defaultValues []DefaultValue
+
+	if len(s.DefaultChannels) > 0 {
+		for _, channelId := range s.DefaultChannels {
+			defaultValues = append(defaultValues, DefaultValue{Id: channelId, Type: "channel"})
+		}
+	}
+
+	msg.DefaultValues = defaultValues
 
 	if s.ValueLimits != [2]int{0, 0} {
 		msg.MinValues = new(int)
