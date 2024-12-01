@@ -132,7 +132,7 @@ type InstallParams struct {
 	Permissions Permissions `json:"permissions,string"`
 }
 
-type ApplicationIntegrationType uint8
+type ApplicationIntegrationType uint16
 
 const (
 	ApplicationIntegrationTypeGuild ApplicationIntegrationType = iota
