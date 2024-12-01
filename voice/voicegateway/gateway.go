@@ -67,6 +67,8 @@ var DefaultGatewayOpts = ws.GatewayOpts{
 		4012, // unknown protocol
 		4014, // disconnected
 		4016, // unknown encryption mode
+		4013, // invalid intents
+		4014, // disallowed intents
 	},
 	DialTimeout:           0,
 	ReconnectAttempt:      0,
