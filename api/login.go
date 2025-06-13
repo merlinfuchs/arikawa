@@ -1,6 +1,9 @@
 package api
 
-import "github.com/diamondburned/arikawa/v3/utils/httputil"
+import (
+	"github.com/diamondburned/arikawa/v3/discord"
+	"github.com/diamondburned/arikawa/v3/utils/httputil"
+)
 
 var (
 	EndpointAuth  = Endpoint + "auth/"
@@ -8,19 +11,33 @@ var (
 	EndpointTOTP  = EndpointAuth + "mfa/totp"
 )
 
-type LoginResponse struct {
-	MFA    bool   `json:"mfa"`
-	SMS    bool   `json:"sms"`
-	Ticket string `json:"ticket"`
-	Token  string `json:"token"`
-}
+type (
+	LoginSettings struct {
+		Locale discord.Language `json:"locale"`
+		Theme  string           `json:"theme"`
+	}
 
-func (c *Client) Login(email, password string) (*LoginResponse, error) {
+	LoginResponse struct {
+		UserID          discord.UserID `json:"user_id"`
+		Token           string         `json:"token"`
+		UserSettings    LoginSettings  `json:"user_settings"`
+		RequiredActions []string       `json:"required_actions"`
+
+		Ticket string `json:"ticket"`
+		MFA    bool   `json:"mfa"`
+		TOTP   bool   `json:"totp"`
+		SMS    bool   `json:"sms"`
+		Backup bool   `json:"backup"`
+	}
+)
+
+// login is the user's email or E.164-formatted phone number
+func (c *Client) Login(login, password string) (*LoginResponse, error) {
 	var param struct {
-		Email    string `json:"email"`
+		Login    string `json:"login"`
 		Password string `json:"password"`
 	}
-	param.Email = email
+	param.Login = login
 	param.Password = password
 
 	var r *LoginResponse
