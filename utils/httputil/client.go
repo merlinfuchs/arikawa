@@ -254,8 +254,13 @@ func (c *Client) request(
 			err := json.Unmarshal(buf.Bytes(), &errBody)
 
 			if err == nil {
-				time.Sleep(time.Duration(errBody.RetryAfter) * time.Second)
-				continue
+				select {
+				case <-ctx.Done():
+					doErr = ctx.Err()
+					return
+				case <-time.After(time.Duration(errBody.RetryAfter) * time.Second):
+					continue
+				}
 			} else {
 				doErr = fmt.Errorf("failed to parse rate limit body: %w", err)
 				continue
