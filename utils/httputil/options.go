@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/url"
@@ -68,9 +69,18 @@ func WithSchema(schema SchemaEncoder, v interface{}) RequestOption {
 	}
 }
 
+// WithBody inserts a body into the request.
+// Note: The body can only be used for the first request attempt, all subsequent attempts will have an empty body.
 func WithBody(body io.ReadCloser) RequestOption {
 	return func(r httpdriver.Request) error {
 		r.WithBody(body)
+		return nil
+	}
+}
+
+func WithBodyBytes(b []byte) RequestOption {
+	return func(r httpdriver.Request) error {
+		r.WithBody(io.NopCloser(bytes.NewReader(b)))
 		return nil
 	}
 }
