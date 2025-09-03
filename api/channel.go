@@ -388,7 +388,7 @@ type StartThreadData struct {
 	//
 	// Note that the three and seven day archive durations require the server
 	// to be boosted.
-	AutoArchiveDuration discord.ArchiveDuration `json:"auto_archive_duration"`
+	AutoArchiveDuration discord.ArchiveDuration `json:"auto_archive_duration,omitempty"`
 	// Type is the type of thread to create.
 	//
 	// This field can only be used when starting a thread without a message
