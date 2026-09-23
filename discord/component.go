@@ -8,6 +8,7 @@ import (
 
 	"github.com/diamondburned/arikawa/v3/internal/rfutil"
 	"github.com/diamondburned/arikawa/v3/utils/json"
+	"github.com/diamondburned/arikawa/v3/utils/json/option"
 )
 
 // ComponentType is the type of a component.
@@ -1373,7 +1374,7 @@ const (
 
 type SeparatorComponent struct {
 	// Whether a visual divider should be displayed in the component. Defaults to `true`
-	Divider bool `json:"divider,omitempty"`
+	Divider option.Bool `json:"divider,omitempty"`
 	// Size of separator padding—`1` for small padding, `2` for large padding. Defaults to `
 	Spacing SeparatorComponentSpacing `json:"spacing,omitempty"`
 }
