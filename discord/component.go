@@ -1407,8 +1407,9 @@ func (s *SeparatorComponent) MarshalJSON() ([]byte, error) {
 type ContainerComponent struct {
 	// Child components that are encapsulated within the Container
 	Components []Component `json:"components"`
-	// Color for the accent on the container as RGB from `0x000000` to `0xFFFFFF`
-	AccentColor Color `json:"accent_color,omitempty"`
+	// Color for the accent on the container as RGB from `0x000000` to `0xFFFFFF`.
+	// A pointer so that black (0) can be sent.
+	AccentColor *Color `json:"accent_color,omitempty"`
 	// Whether the container should be a spoiler (or blurred out). Defaults to `false`.
 	Spoiler bool `json:"spoiler,omitempty"`
 }
@@ -1425,7 +1426,7 @@ func (s *ContainerComponent) _tlc() {}
 func (s *ContainerComponent) UnmarshalJSON(b []byte) error {
 	var container struct {
 		Components  []json.Raw `json:"components"`
-		AccentColor Color      `json:"accent_color,omitempty"`
+		AccentColor *Color     `json:"accent_color,omitempty"`
 		Spoiler     bool       `json:"spoiler,omitempty"`
 	}
 

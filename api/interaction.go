@@ -201,6 +201,9 @@ type EditInteractionResponseData struct {
 	AllowedMentions *AllowedMentions `json:"allowed_mentions,omitempty"`
 	// Attachments are the attached files to keep.
 	Attachments *[]discord.Attachment `json:"attachments,omitempty"`
+	// Flags edits the flags of the message, e.g. IsComponentsV2 when a
+	// deferred response is turned into a components v2 message.
+	Flags *discord.MessageFlags `json:"flags,omitempty"`
 
 	// Files represents a list of files to upload. This will not be
 	// JSON-encoded and will only be available through WriteMultipart.
