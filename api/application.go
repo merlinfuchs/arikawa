@@ -22,23 +22,23 @@ func (c *Client) CurrentApplication() (*discord.Application, error) {
 // https://discord.com/developers/docs/interactions/application-commands#create-global-application-command
 // https://discord.com/developers/docs/interactions/application-commands#bulk-overwrite-guild-application-commands
 type CreateCommandData struct {
-	ID                       discord.CommandID      `json:"id,omitempty"`
-	Name                     string                 `json:"name"`
-	NameLocalizations        discord.StringLocales  `json:"name_localizations,omitempty"`
-	Description              string                 `json:"description"`
-	DescriptionLocalizations discord.StringLocales  `json:"description_localizations,omitempty"`
-	Options                  discord.CommandOptions `json:"options,omitempty"`
-	DefaultMemberPermissions *discord.Permissions   `json:"default_member_permissions,string,omitempty"`
-	NoDMPermission           bool                   `json:"-"`
-	NoDefaultPermission      bool                   `json:"-"`
-	Type                     discord.CommandType    `json:"type,omitempty"`
+	ID                       discord.CommandID                    `json:"id,omitempty"`
+	Name                     string                               `json:"name"`
+	NameLocalizations        discord.StringLocales                `json:"name_localizations,omitempty"`
+	Description              string                               `json:"description"`
+	DescriptionLocalizations discord.StringLocales                `json:"description_localizations,omitempty"`
+	Options                  discord.CommandOptions               `json:"options,omitempty"`
+	DefaultMemberPermissions *discord.Permissions                 `json:"default_member_permissions,string,omitempty"`
+	NoDefaultPermission      bool                                 `json:"-"`
+	Type                     discord.CommandType                  `json:"type,omitempty"`
+	IntegrationTypes         []discord.ApplicationIntegrationType `json:"integration_types,omitempty"`
+	Contexts                 []discord.InteractionContext         `json:"contexts,omitempty"`
 }
 
 func (c CreateCommandData) MarshalJSON() ([]byte, error) {
 	type RawCreateCommandData CreateCommandData
 	cmd := struct {
 		RawCreateCommandData
-		DMPermission      bool `json:"dm_permission"`
 		DefaultPermission bool `json:"default_permission"`
 	}{RawCreateCommandData: (RawCreateCommandData)(c)}
 
@@ -46,7 +46,6 @@ func (c CreateCommandData) MarshalJSON() ([]byte, error) {
 	// meaning of the field (>No<DefaultPermission) to match Go's default
 	// value, false.
 	cmd.DefaultPermission = !c.NoDefaultPermission
-	cmd.DMPermission = !c.NoDMPermission
 
 	return json.Marshal(cmd)
 }
@@ -55,7 +54,6 @@ func (c *CreateCommandData) UnmarshalJSON(data []byte) error {
 	type RawCreateCommandData CreateCommandData
 	cmd := struct {
 		*RawCreateCommandData
-		DMPermission      bool `json:"dm_permission"`
 		DefaultPermission bool `json:"default_permission"`
 	}{RawCreateCommandData: (*RawCreateCommandData)(c)}
 	if err := json.Unmarshal(data, &cmd); err != nil {
@@ -66,7 +64,6 @@ func (c *CreateCommandData) UnmarshalJSON(data []byte) error {
 	// meaning of the field (>No<DefaultPermission) to match Go's default
 	// value, false.
 	c.NoDefaultPermission = !cmd.DefaultPermission
-	c.NoDMPermission = !cmd.DMPermission
 
 	// Discord defaults type to 1 if omitted.
 	if c.Type == 0 {

@@ -53,16 +53,28 @@ type Command struct {
 	Options CommandOptions `json:"options,omitempty"`
 	// DefaultMemberPermissions is set of permissions.
 	DefaultMemberPermissions *Permissions `json:"default_member_permissions,string,omitempty"`
-	// NoDMPermission indicates whether the command is NOT available in DMs with
-	// the app, only for globally-scoped commands. By default, commands are visible.
-	NoDMPermission bool `json:"-"`
 	// NoDefaultPermissions defines whether the command is NOT enabled by
 	// default when the app is added to a guild.
 	NoDefaultPermission bool `json:"-"`
 	// Version is an autoincrementing version identifier updated during
 	// substantial record changes
 	Version Snowflake `json:"version,omitempty"`
+	// Installation contexts where the command is available, only for
+	// globally-scoped commands.
+	IntegrationTypes []ApplicationIntegrationType `json:"integration_types,omitempty"`
+	// Interaction context(s) where the command can be used, only for
+	// globally-scoped commands.
+	Contexts []InteractionContext `json:"contexts,omitempty"`
 }
+
+// InteractionContext is the context in which a command can be used.
+type InteractionContext uint
+
+const (
+	InteractionContextGuild InteractionContext = iota
+	InteractionContextBotDM
+	InteractionContextPrivateChannel
+)
 
 // Language is a string type for language codes, such as "en-US" or "fr". Refer
 // to the constants for valid language codes.
@@ -124,7 +136,6 @@ func (c *Command) MarshalJSON() ([]byte, error) {
 	// meaning of the field (>No<DefaultPermission) to match Go's default
 	// value, false.
 	cmd.DefaultPermission = !c.NoDefaultPermission
-	cmd.DMPermission = !c.NoDMPermission
 
 	return json.Marshal(cmd)
 }
@@ -148,7 +159,6 @@ func (c *Command) UnmarshalJSON(data []byte) error {
 	// meaning of the field (>No<DefaultPermission) to match Go's default
 	// value, false.
 	c.NoDefaultPermission = !cmd.DefaultPermission
-	c.NoDMPermission = !cmd.DMPermission
 
 	// Discord defaults type to 1 if omitted.
 	if c.Type == 0 {
