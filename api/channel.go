@@ -1,9 +1,13 @@
 package api
 
 import (
+	"fmt"
+	"mime/multipart"
+
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/utils/httputil"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
+	"github.com/diamondburned/arikawa/v3/utils/sendpart"
 )
 
 var EndpointChannels = Endpoint + "channels/"
@@ -436,6 +440,56 @@ func (c *Client) StartThreadWithoutMessage(
 		&ch, "POST",
 		EndpointChannels+channelID.String()+"/threads",
 		httputil.WithJSONBody(data), httputil.WithHeaders(data.Header()),
+	)
+}
+
+// https://discord.com/developers/docs/resources/channel#start-thread-in-forum-or-media-channel-jsonform-params
+type StartForumThreadData struct {
+	// Name is the 1-100 character channel name.
+	Name string `json:"name"`
+	// AutoArchiveDuration is the duration in minutes to automatically archive
+	// the thread after recent activity.
+	AutoArchiveDuration discord.ArchiveDuration `json:"auto_archive_duration,omitempty"`
+	// UserRateLimit is the amount of seconds a user has to wait before sending
+	// another message.
+	UserRateLimit discord.Seconds `json:"rate_limit_per_user,omitempty"`
+	// AppliedTags are the IDs of the tags applied to the thread.
+	AppliedTags []discord.TagID `json:"applied_tags,omitempty"`
+	// Message is the first message of the thread. Discord ignores the fields
+	// it doesn't allow for forum messages, like TTS and Reference.
+	Message SendMessageData `json:"message"`
+
+	AuditLogReason `json:"-"`
+}
+
+// NeedsMultipart returns true if the message has files.
+func (data StartForumThreadData) NeedsMultipart() bool {
+	return data.Message.NeedsMultipart()
+}
+
+// WriteMultipart writes the data and the files of the message.
+func (data StartForumThreadData) WriteMultipart(body *multipart.Writer) error {
+	return sendpart.Write(body, data, data.Message.Files)
+}
+
+// StartThreadInForum creates a new thread in a forum or media channel, with
+// the message as its first message. The returned channel is the thread.
+//
+// Fires a Thread Create and a Message Create Gateway event.
+func (c *Client) StartThreadInForum(
+	channelID discord.ChannelID, data StartForumThreadData) (*discord.Channel, error) {
+
+	if data.Message.AllowedMentions != nil {
+		if err := data.Message.AllowedMentions.Verify(); err != nil {
+			return nil, fmt.Errorf("allowedMentions error: %w", err)
+		}
+	}
+
+	var ch *discord.Channel
+	return ch, sendpart.POST(
+		c.Client, data, &ch,
+		EndpointChannels+channelID.String()+"/threads",
+		httputil.WithHeaders(data.Header()),
 	)
 }
 
