@@ -486,8 +486,8 @@ type CommandInteraction struct {
 	// TargetID is the id of the user or message targeted by a user or message command.
 	//
 	// See TargetUserID and TargetMessageID
-	TargetID Snowflake `json:"target_id,omitempty"`
-	Resolved ResolvedData
+	TargetID Snowflake    `json:"target_id,omitempty"`
+	Resolved ResolvedData `json:"resolved"`
 }
 
 // ResolvedData contains the objects referenced by the IDs in an interaction's
