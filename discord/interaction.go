@@ -751,6 +751,21 @@ func (o CommandInteractionOption) FloatValue() (float64, error) {
 type ModalInteraction struct {
 	CustomID   ComponentID        `json:"custom_id"`
 	Components TopLevelComponents `json:"components"`
+	// Resolved contains the objects picked or uploaded in the modal's
+	// components, such as the files of a file upload.
+	Resolved struct {
+		// Users contains user objects.
+		Users map[UserID]User `json:"users,omitempty"`
+		// Members contains partial member objects (missing User, Deaf and
+		// Mute).
+		Members map[UserID]Member `json:"members,omitempty"`
+		// Roles contains role objects.
+		Roles map[RoleID]Role `json:"roles,omitempty"`
+		// Channels contains partial channel objects.
+		Channels map[ChannelID]Channel `json:"channels,omitempty"`
+		// Attachments contains attachment objects.
+		Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
+	} `json:"resolved,omitempty"`
 }
 
 // InteractionType implements InteractionData.
