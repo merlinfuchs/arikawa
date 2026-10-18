@@ -487,24 +487,28 @@ type CommandInteraction struct {
 	//
 	// See TargetUserID and TargetMessageID
 	TargetID Snowflake `json:"target_id,omitempty"`
-	Resolved struct {
-		// User contains user objects.
-		Users map[UserID]User `json:"users,omitempty"`
-		// Members contains partial member objects (missing User, Deaf and
-		// Mute).
-		Members map[UserID]Member `json:"members,omitempty"`
-		// Role contains role objects.
-		Roles map[RoleID]Role `json:"roles,omitempty"`
-		// Channels contains partial channel objects that only have ID, Name,
-		// Type and Permissions. Threads will also have ThreadMetadata and
-		// ParentID.
-		Channels map[ChannelID]Channel `json:"channels,omitempty"`
-		// Messages contains partial message objects. All fields without
-		// omitempty are presumably present.
-		Messages map[MessageID]Message `json:"messages,omitempty"`
-		// Attachments contains attachments objects.
-		Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
-	}
+	Resolved ResolvedData
+}
+
+// ResolvedData contains the objects referenced by the IDs in an interaction's
+// options or components.
+type ResolvedData struct {
+	// User contains user objects.
+	Users map[UserID]User `json:"users,omitempty"`
+	// Members contains partial member objects (missing User, Deaf and
+	// Mute).
+	Members map[UserID]Member `json:"members,omitempty"`
+	// Role contains role objects.
+	Roles map[RoleID]Role `json:"roles,omitempty"`
+	// Channels contains partial channel objects that only have ID, Name,
+	// Type and Permissions. Threads will also have ThreadMetadata and
+	// ParentID.
+	Channels map[ChannelID]Channel `json:"channels,omitempty"`
+	// Messages contains partial message objects. All fields without
+	// omitempty are presumably present.
+	Messages map[MessageID]Message `json:"messages,omitempty"`
+	// Attachments contains attachments objects.
+	Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
 }
 
 // InteractionType implements InteractionData.
@@ -753,19 +757,7 @@ type ModalInteraction struct {
 	Components TopLevelComponents `json:"components"`
 	// Resolved contains the objects picked or uploaded in the modal's
 	// components, such as the files of a file upload.
-	Resolved struct {
-		// Users contains user objects.
-		Users map[UserID]User `json:"users,omitempty"`
-		// Members contains partial member objects (missing User, Deaf and
-		// Mute).
-		Members map[UserID]Member `json:"members,omitempty"`
-		// Roles contains role objects.
-		Roles map[RoleID]Role `json:"roles,omitempty"`
-		// Channels contains partial channel objects.
-		Channels map[ChannelID]Channel `json:"channels,omitempty"`
-		// Attachments contains attachment objects.
-		Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
-	} `json:"resolved,omitempty"`
+	Resolved ResolvedData `json:"resolved"`
 }
 
 // InteractionType implements InteractionData.
