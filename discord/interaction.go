@@ -486,25 +486,29 @@ type CommandInteraction struct {
 	// TargetID is the id of the user or message targeted by a user or message command.
 	//
 	// See TargetUserID and TargetMessageID
-	TargetID Snowflake `json:"target_id,omitempty"`
-	Resolved struct {
-		// User contains user objects.
-		Users map[UserID]User `json:"users,omitempty"`
-		// Members contains partial member objects (missing User, Deaf and
-		// Mute).
-		Members map[UserID]Member `json:"members,omitempty"`
-		// Role contains role objects.
-		Roles map[RoleID]Role `json:"roles,omitempty"`
-		// Channels contains partial channel objects that only have ID, Name,
-		// Type and Permissions. Threads will also have ThreadMetadata and
-		// ParentID.
-		Channels map[ChannelID]Channel `json:"channels,omitempty"`
-		// Messages contains partial message objects. All fields without
-		// omitempty are presumably present.
-		Messages map[MessageID]Message `json:"messages,omitempty"`
-		// Attachments contains attachments objects.
-		Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
-	}
+	TargetID Snowflake    `json:"target_id,omitempty"`
+	Resolved ResolvedData `json:"resolved"`
+}
+
+// ResolvedData contains the objects referenced by the IDs in an interaction's
+// options or components.
+type ResolvedData struct {
+	// User contains user objects.
+	Users map[UserID]User `json:"users,omitempty"`
+	// Members contains partial member objects (missing User, Deaf and
+	// Mute).
+	Members map[UserID]Member `json:"members,omitempty"`
+	// Role contains role objects.
+	Roles map[RoleID]Role `json:"roles,omitempty"`
+	// Channels contains partial channel objects that only have ID, Name,
+	// Type and Permissions. Threads will also have ThreadMetadata and
+	// ParentID.
+	Channels map[ChannelID]Channel `json:"channels,omitempty"`
+	// Messages contains partial message objects. All fields without
+	// omitempty are presumably present.
+	Messages map[MessageID]Message `json:"messages,omitempty"`
+	// Attachments contains attachments objects.
+	Attachments map[AttachmentID]Attachment `json:"attachments,omitempty"`
 }
 
 // InteractionType implements InteractionData.
@@ -751,6 +755,9 @@ func (o CommandInteractionOption) FloatValue() (float64, error) {
 type ModalInteraction struct {
 	CustomID   ComponentID        `json:"custom_id"`
 	Components TopLevelComponents `json:"components"`
+	// Resolved contains the objects picked or uploaded in the modal's
+	// components, such as the files of a file upload.
+	Resolved ResolvedData `json:"resolved"`
 }
 
 // InteractionType implements InteractionData.
