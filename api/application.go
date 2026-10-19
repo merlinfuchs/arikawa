@@ -10,12 +10,15 @@ import (
 var EndpointApplications = Endpoint + "applications/"
 
 // CurrentApplication returns the current bot account's Discord application. It
-// can be used to get the application ID.
+// can be used to get the application ID. Unlike the OAuth2 endpoint, it
+// includes the approximate guild and user install counts.
+//
+// https://discord.com/developers/docs/resources/application#get-current-application
 func (c *Client) CurrentApplication() (*discord.Application, error) {
 	var app *discord.Application
 	return app, c.RequestJSON(
 		&app, "GET",
-		Endpoint+"/oauth2/applications/@me",
+		EndpointApplications+"@me",
 	)
 }
 

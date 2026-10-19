@@ -34,6 +34,15 @@ type Application struct {
 	CoverImage *Hash `json:"cover_image"`
 	// Flags is the application's public flags.
 	Flags ApplicationFlags `json:"flags"`
+	// ApproximateGuildCount is the approximate number of guilds the app has
+	// been added to.
+	ApproximateGuildCount int `json:"approximate_guild_count,omitempty"`
+	// ApproximateUserInstallCount is the approximate number of users that
+	// have installed the app.
+	ApproximateUserInstallCount int `json:"approximate_user_install_count,omitempty"`
+	// ApproximateUserAuthorizationCount is the approximate number of users
+	// that have OAuth2 authorizations for the app.
+	ApproximateUserAuthorizationCount int `json:"approximate_user_authorization_count,omitempty"`
 
 	// The following fields are only present on applications that are games
 	// sold on Discord.
