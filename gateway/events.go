@@ -295,10 +295,11 @@ type GuildDeleteEvent struct {
 }
 
 // GuildAuditLogEntryCreateEvent is a dispatch event.
-
-// https://discord.com/developers/docs/topics/gateway#guilds
+//
+// https://discord.com/developers/docs/topics/gateway-events#guild-audit-log-entry-create
 type GuildAuditLogEntryCreateEvent struct {
 	discord.AuditLogEntry
+	GuildID discord.GuildID `json:"guild_id"`
 }
 
 // GuildBanAddEvent is a dispatch event.
