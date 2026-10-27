@@ -401,7 +401,7 @@ type StartThreadData struct {
 	// non-moderators to a thread; only available on private threads.
 	//
 	// This field can only be used when starting a thread without a message
-	Invitable bool `json:"invitable,omitempty"`
+	Invitable option.Bool `json:"invitable,omitempty"`
 
 	AuditLogReason `json:"-"`
 }
