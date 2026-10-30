@@ -3,16 +3,47 @@ package udp
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/crypto/chacha20poly1305"
 )
+
+// The transport encryption modes Discord supports.
+//
+// https://discord.com/developers/docs/topics/voice-connections#transport-encryption-modes
+const (
+	// AEADAES256GCMRTPSize is the preferred mode, used if the server offers it.
+	AEADAES256GCMRTPSize = "aead_aes256_gcm_rtpsize"
+	// AEADXChaCha20Poly1305RTPSize is the mode every server supports.
+	AEADXChaCha20Poly1305RTPSize = "aead_xchacha20_poly1305_rtpsize"
+)
+
+// ErrNoSupportedMode is returned by ChooseMode if none of the modes is
+// supported.
+var ErrNoSupportedMode = errors.New("no supported encryption mode")
+
+// ChooseMode returns the best of the given modes that this package supports.
+func ChooseMode(modes []string) (string, error) {
+	for _, mode := range []string{AEADAES256GCMRTPSize, AEADXChaCha20Poly1305RTPSize} {
+		if slices.Contains(modes, mode) {
+			return mode, nil
+		}
+	}
+	return "", fmt.Errorf("%w in %v", ErrNoSupportedMode, modes)
+}
+
+// nonceSize is the size of the nonce that's appended to every packet. The
+// rest of the AEAD nonce is zero.
+const nonceSize = 4
 
 // ErrDecryptionFailed is returned from ReadPacket if the received packet fails
 // to decrypt.
@@ -38,14 +69,16 @@ type Connection struct {
 	stopFreq  chan struct{}
 
 	packet [12]byte
-	secret [32]byte
+	aead   cipher.AEAD
 
 	sequence  uint16
 	timestamp uint32
-	nonce     [24]byte
+	nonce     uint32
+	sendNonce []byte
+	sendBuf   []byte
 
 	// recv fields
-	recvNonce  [24]byte
+	recvNonce  []byte
 	recvBuf    []byte  // len 1400
 	recvOpus   []byte  // len 1400
 	recvPacket *Packet // uses recvOpus' backing array
@@ -174,10 +207,36 @@ func (c *Connection) ResetFrequency(frameDuration time.Duration, timeIncr uint32
 	c.timeIncr = timeIncr
 }
 
-// UseSecret uses the given secret. This method is not thread-safe, so it should
-// only be used right after initialization.
-func (c *Connection) UseSecret(secret [32]byte) {
-	c.secret = secret
+// UseSecret uses the given secret with the given transport encryption mode,
+// one of the modes ChooseMode can return. This method is not thread-safe, so
+// it should only be used right after initialization.
+func (c *Connection) UseSecret(mode string, secret [32]byte) error {
+	var aead cipher.AEAD
+
+	switch mode {
+	case AEADAES256GCMRTPSize:
+		block, err := aes.NewCipher(secret[:])
+		if err != nil {
+			return fmt.Errorf("failed to create AES cipher: %w", err)
+		}
+		aead, err = cipher.NewGCM(block)
+		if err != nil {
+			return fmt.Errorf("failed to create GCM cipher: %w", err)
+		}
+	case AEADXChaCha20Poly1305RTPSize:
+		var err error
+		aead, err = chacha20poly1305.NewX(secret[:])
+		if err != nil {
+			return fmt.Errorf("failed to create XChaCha20-Poly1305 cipher: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported encryption mode %q", mode)
+	}
+
+	c.aead = aead
+	c.sendNonce = make([]byte, aead.NonceSize())
+	c.recvNonce = make([]byte, aead.NonceSize())
+	return nil
 }
 
 // SetWriteDeadline sets the UDP connection's write deadline.
@@ -205,6 +264,10 @@ func (c *Connection) Close() error {
 // stream-compatible: the internal frequency clock will slow Write down to match
 // the real playback time.
 func (c *Connection) Write(b []byte) (int, error) {
+	if c.aead == nil {
+		return 0, errors.New("no secret to encrypt the packet with")
+	}
+
 	// Write a new sequence.
 	binary.BigEndian.PutUint16(c.packet[2:4], c.sequence)
 	c.sequence++
@@ -212,12 +275,15 @@ func (c *Connection) Write(b []byte) (int, error) {
 	binary.BigEndian.PutUint32(c.packet[4:8], c.timestamp)
 	c.timestamp += c.timeIncr
 
-	// Copy the first 12 bytes from the packet into the nonce.
-	copy(c.nonce[:12], c.packet[:])
+	// The RTP header is sent unencrypted but authenticated, followed by the
+	// encrypted payload and the 4 bytes of the nonce that aren't zero.
+	binary.BigEndian.PutUint32(c.sendNonce[:nonceSize], c.nonce)
+	c.nonce++
 
-	// Seal the message, but reuse the packet buffer. We pass in the first 12
-	// bytes of the packet, but allow it to reuse the whole packet buffer
-	toSend := secretbox.Seal(c.packet[:12], b, &c.nonce, &c.secret)
+	toSend := append(c.sendBuf[:0], c.packet[:]...)
+	toSend = c.aead.Seal(toSend, c.sendNonce, b, c.packet[:])
+	toSend = append(toSend, c.sendNonce[:nonceSize]...)
+	c.sendBuf = toSend
 
 	select {
 	case <-c.frequency.C:
@@ -278,25 +344,22 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 			return nil, err
 		}
 
-		if i < packetHeaderSize || (c.recvBuf[0] != 0x80 && c.recvBuf[0] != 0x90) {
+		if i < packetHeaderSize || c.recvPacket.VersionFlags()&0xC0 != 0x80 {
 			continue
 		}
 
-		// Copy the nonce to be read.
-		// TODO: once Go 1.17 is released, we can remove recvNonce and directly
-		// cast it as (*[packetHeaderSize]byte)(c.recvBuf).
-		copy(c.recvNonce[:], c.recvBuf[0:packetHeaderSize])
+		// Skip RTCP packets. Their packet types 192-223 overlap with the
+		// marker bit and payload types 64-95 of RTP, see RFC 5761 section 4.
+		if pt := c.recvPacket.Type() & 0x7F; pt >= 64 && pt <= 95 {
+			continue
+		}
 
-		var ok bool
-
-		// Open (decrypt) the rest of the received bytes.
-		c.recvPacket.Opus, ok = secretbox.Open(
-			c.recvOpus[:0], c.recvBuf[packetHeaderSize:i], &c.recvNonce, &c.secret)
-		if !ok {
+		if c.aead == nil {
 			return nil, ErrDecryptionFailed
 		}
 
-		// Partial structure of the RTP header for reference
+		// With the rtpsize modes, the fixed RTP header, the CSRCs and the
+		// first 4 bytes of a header extension are unencrypted.
 		//
 		//     0                   1                   2                   3
 		//     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -309,9 +372,11 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 		// References
 		//
 		//    https://tools.ietf.org/html/rfc3550#section-5.1
+		//    https://discord.com/developers/docs/topics/voice-connections#transport-encryption-modes
 		//
+		headerSize := packetHeaderSize + 4*int(c.recvPacket.VersionFlags()&0x0F)
 
-		// We first check VersionFlags (8-bit) for whether or not the 4th bit
+		// We check VersionFlags (8-bit) for whether or not the 4th bit
 		// (extension) is set. The value of 0x10 is 0b00010000. RFC3550 section
 		// 5.1 explains the extension bit as:
 		//
@@ -321,38 +386,32 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 		//
 		isExtension := c.recvPacket.VersionFlags()&0x10 == 0x10
 
-		// We then check for whether or not the marker bit (9th bit) is set. The
-		// 9th bit is carried over to the second byte (Type), so we check its
-		// presence with 0x80, or 0b10000000. RFC3550 section 5.1 explains the
-		// marker bit as:
-		//
-		//     The interpretation of the marker is defined by a profile.  It is
-		//     intended to allow significant events such as frame boundaries to
-		//     be marked in the packet stream.  A profile MAY define additional
-		//     marker bits or specify that there is no marker bit by changing
-		//     the number of bits in the payload type field (see Section 5.3).
-		//
-		// RFC3350 section 12.1 also writes:
-		//
-		//    When the RTCP packet type field is compared to the corresponding
-		//    octet of the RTP header, this range corresponds to the marker bit
-		//    being 1 (which it usually is not in data packets) and to the high
-		//    bit of the standard payload type field being 1 (since the static
-		//    payload types are typically defined in the low half).
-		//
-		// This implies that, when the marker bit is 1, the received packet is
-		// an RTCP packet and NOT an RTP packet; therefore, we must ignore the
-		// unknown sections, so we do a (NOT isMarker) check below.
-		isMarker := c.recvPacket.Type()&0x80 != 0x0
-
-		if isExtension && !isMarker {
-			extLen := binary.BigEndian.Uint16(c.recvPacket.Opus[2:4])
-			shift := 4 + 4*int(extLen)
-
-			if len(c.recvPacket.Opus) > shift {
-				c.recvPacket.Opus = c.recvPacket.Opus[shift:]
+		var extLen int
+		if isExtension {
+			if i < headerSize+4 {
+				continue
 			}
+			extLen = 4 * int(binary.BigEndian.Uint16(c.recvBuf[headerSize+2:headerSize+4]))
+			headerSize += 4
 		}
+
+		if i < headerSize+c.aead.Overhead()+nonceSize {
+			continue
+		}
+
+		copy(c.recvNonce[:nonceSize], c.recvBuf[i-nonceSize:i])
+
+		opus, err := c.aead.Open(
+			c.recvOpus[:0], c.recvNonce, c.recvBuf[headerSize:i-nonceSize], c.recvBuf[:headerSize])
+		if err != nil {
+			return nil, ErrDecryptionFailed
+		}
+
+		// The header extension's data is encrypted with the payload, skip it.
+		if extLen > len(opus) {
+			continue
+		}
+		c.recvPacket.Opus = opus[extLen:]
 
 		return c.recvPacket, nil
 	}

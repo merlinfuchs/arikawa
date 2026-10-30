@@ -12,16 +12,23 @@ package voicegateway
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/disgoorg/godave"
+	davesession "github.com/thomas-vilte/dave-go/session"
 
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/utils/ws"
 )
 
 // Version represents the current version of the Discord Gateway Gateway this package uses.
-const Version = "4"
+const Version = "8"
 
 var (
 	ErrNoSessionID = errors.New("no sessionID was received")
@@ -43,9 +50,20 @@ type State struct {
 type Gateway struct {
 	gateway *ws.Gateway
 	state   State // constant
+	dave    godave.Session
 
-	mutex sync.RWMutex
-	ready *ReadyEvent
+	// seq is the sequence number of the last numbered message received, sent
+	// back to the gateway in heartbeats and resumes.
+	seq atomic.Int64
+
+	// daveSends holds the messages of the DAVE session until they're sent.
+	// The DAVE session calls its callbacks while holding its lock, so they
+	// mustn't wait for the websocket.
+	daveSends chan ws.Event
+
+	mutex     sync.RWMutex
+	ready     *ReadyEvent
+	ssrcUsers map[uint32]discord.UserID
 }
 
 // DefaultGatewayOpts contains the default options to be used for connecting to
@@ -67,26 +85,45 @@ var DefaultGatewayOpts = ws.GatewayOpts{
 		4012, // unknown protocol
 		4014, // disconnected
 		4016, // unknown encryption mode
+		4017, // E2EE/DAVE protocol required
 	},
 	DialTimeout:           0,
 	ReconnectAttempt:      0,
 	AlwaysCloseGracefully: true,
 }
 
-// New creates a new voice gateway.
+// New creates a new voice gateway that uses the pure Go DAVE implementation
+// of github.com/thomas-vilte/dave-go for the end-to-end encryption of the
+// call.
 func New(state State) *Gateway {
+	return NewWithDAVE(state, davesession.CreateFunc())
+}
+
+// NewWithDAVE creates a new voice gateway that uses a DAVE session created
+// with createDAVE for the end-to-end encryption of the call. The session is
+// closed once the gateway is closed.
+func NewWithDAVE(state State, createDAVE godave.SessionCreateFunc) *Gateway {
 	// https://discord.com/developers/docs/topics/voice-connections#establishing-a-voice-websocket-connection
 	endpoint := "wss://" + strings.TrimSuffix(state.Endpoint, ":80") + "/?v=" + Version
 
+	codec := ws.NewCodec(OpUnmarshalers)
+	codec.BinaryUnmarshaler = UnmarshalBinaryOp
+
 	gw := ws.NewGateway(
-		ws.NewWebsocket(ws.NewCodec(OpUnmarshalers), endpoint),
+		ws.NewWebsocket(codec, endpoint),
 		&DefaultGatewayOpts,
 	)
 
-	return &Gateway{
-		gateway: gw,
-		state:   state,
+	g := &Gateway{
+		gateway:   gw,
+		state:     state,
+		daveSends: make(chan ws.Event, daveSendQueueSize),
+		ssrcUsers: make(map[uint32]discord.UserID),
 	}
+	g.dave = createDAVE(slog.Default(), godave.UserID(state.UserID.String()), daveCallbacks{g})
+	g.dave.SetChannelID(godave.ChannelID(state.ChannelID))
+
+	return g
 }
 
 // Ready returns the ready event.
@@ -95,6 +132,21 @@ func (g *Gateway) Ready() *ReadyEvent {
 	defer g.mutex.RUnlock()
 
 	return g.ready
+}
+
+// DAVE returns the DAVE session of the call. It encrypts outgoing and
+// decrypts incoming audio frames.
+func (g *Gateway) DAVE() godave.Session {
+	return g.dave
+}
+
+// UserIDBySSRC returns the ID of the user who sends audio with the given SSRC,
+// or 0 if it's not known yet. It's known once the user started speaking.
+func (g *Gateway) UserIDBySSRC(ssrc uint32) discord.UserID {
+	g.mutex.RLock()
+	defer g.mutex.RUnlock()
+
+	return g.ssrcUsers[ssrc]
 }
 
 // LastError returns the last error that the gateway has received. It only
@@ -127,7 +179,24 @@ func (g *Gateway) Speaking(ctx context.Context, flag SpeakingFlag) error {
 }
 
 func (g *Gateway) Connect(ctx context.Context) <-chan ws.Op {
+	go g.sendDAVE(ctx)
 	return g.gateway.Connect(ctx, (*gatewayImpl)(g))
+}
+
+// sendDAVE sends the messages of the DAVE session in order until ctx is done.
+func (g *Gateway) sendDAVE(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data := <-g.daveSends:
+			sendCtx, cancel := context.WithTimeout(ctx, daveSendTimeout)
+			if err := g.gateway.Send(sendCtx, data); err != nil {
+				ws.WSError(fmt.Errorf("failed to send DAVE message: %w", err))
+			}
+			cancel()
+		}
+	}
 }
 
 var (
@@ -139,16 +208,56 @@ var (
 	ErrMissingForResume = errors.New("missing GuildID, SessionID, or Token for resuming")
 )
 
+const (
+	// daveSendTimeout is how long the DAVE session's messages to the gateway
+	// may take to be sent.
+	daveSendTimeout = 10 * time.Second
+	// daveSendQueueSize is how many messages of the DAVE session can wait to
+	// be sent.
+	daveSendQueueSize = 16
+)
+
+// daveCallbacks queues the messages of the DAVE session to the gateway.
+type daveCallbacks struct{ g *Gateway }
+
+var _ godave.Callbacks = daveCallbacks{}
+
+func (c daveCallbacks) send(data ws.Event) error {
+	select {
+	case c.g.daveSends <- data:
+		return nil
+	default:
+		return errors.New("too many DAVE messages waiting to be sent")
+	}
+}
+
+func (c daveCallbacks) SendMLSKeyPackage(keyPackage []byte) error {
+	return c.send(&DAVEMLSKeyPackageCommand{KeyPackage: keyPackage})
+}
+
+func (c daveCallbacks) SendMLSCommitWelcome(commitWelcome []byte) error {
+	return c.send(&DAVEMLSCommitWelcomeCommand{CommitWelcome: commitWelcome})
+}
+
+func (c daveCallbacks) SendReadyForTransition(transitionID uint16) error {
+	return c.send(&DAVETransitionReadyCommand{TransitionID: transitionID})
+}
+
+func (c daveCallbacks) SendInvalidCommitWelcome(transitionID uint16) error {
+	return c.send(&DAVEMLSInvalidCommitWelcomeCommand{TransitionID: transitionID})
+}
+
 type gatewayImpl Gateway
 
 func (g *gatewayImpl) sendIdentify(ctx context.Context) error {
 	id := IdentifyCommand{
-		GuildID:   g.state.GuildID,
-		UserID:    g.state.UserID,
-		SessionID: g.state.SessionID,
-		Token:     g.state.Token,
+		GuildID:                g.state.GuildID,
+		UserID:                 g.state.UserID,
+		SessionID:              g.state.SessionID,
+		Token:                  g.state.Token,
+		MaxDAVEProtocolVersion: g.dave.MaxSupportedProtocolVersion(),
 	}
-	if !id.GuildID.IsValid() || id == (IdentifyCommand{}) {
+	if !id.GuildID.IsValid() || !id.UserID.IsValid() || id.SessionID == "" || id.Token == "" {
 		return ErrMissingForIdentify
 	}
 
@@ -164,17 +273,26 @@ func (g *gatewayImpl) sendResume(ctx context.Context) error {
 		GuildID:   g.state.GuildID,
 		SessionID: g.state.SessionID,
 		Token:     g.state.Token,
+		SeqAck:    g.seq.Load(),
 	})
 }
 
 func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
+	if op.Sequence > 0 {
+		g.seq.Store(op.Sequence)
+	}
+
 	switch data := op.Data.(type) {
 	case *HelloEvent:
 		g.gateway.ResetHeartbeat(data.HeartbeatInterval.Duration())
 
+		g.mutex.RLock()
+		ready := g.ready
+		g.mutex.RUnlock()
+
 		// Send Discord either the Identify packet (if it's a fresh
 		// connection), or a Resume packet (if it's a dead connection).
-		if g.ready == nil {
+		if ready == nil {
 			// SessionID is empty, so this is a completely new session.
 			if err := g.sendIdentify(ctx); err != nil {
 				g.gateway.SendErrorWrap(err, "failed to send identify")
@@ -190,13 +308,52 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 		g.mutex.Lock()
 		g.ready = data
 		g.mutex.Unlock()
+
+		g.dave.AssignSsrcToCodec(data.SSRC, godave.CodecOpus)
+	case *SessionDescriptionEvent:
+		g.dave.OnSelectProtocolAck(data.DAVEProtocolVersion)
+	case *SpeakingEvent:
+		if data.UserID.IsValid() {
+			g.mutex.Lock()
+			g.ssrcUsers[data.SSRC] = data.UserID
+			g.mutex.Unlock()
+		}
+	case *ClientsConnectEvent:
+		for _, userID := range data.UserIDs {
+			g.dave.AddUser(godave.UserID(userID.String()))
+		}
+	case *ClientDisconnectEvent:
+		g.mutex.Lock()
+		maps.DeleteFunc(g.ssrcUsers, func(_ uint32, userID discord.UserID) bool {
+			return userID == data.UserID
+		})
+		g.mutex.Unlock()
+
+		g.dave.RemoveUser(godave.UserID(data.UserID.String()))
+	case *DAVEPrepareTransitionEvent:
+		g.dave.OnDavePrepareTransition(data.TransitionID, data.ProtocolVersion)
+	case *DAVEExecuteTransitionEvent:
+		g.dave.OnDaveExecuteTransition(data.TransitionID)
+	case *DAVEPrepareEpochEvent:
+		g.dave.OnDavePrepareEpoch(data.Epoch, data.ProtocolVersion)
+	case *DAVEMLSExternalSenderPackageEvent:
+		g.dave.OnDaveMLSExternalSenderPackage(data.ExternalSenderPackage)
+	case *DAVEMLSProposalsEvent:
+		g.dave.OnDaveMLSProposals(data.Proposals)
+	case *DAVEMLSAnnounceCommitTransitionEvent:
+		g.dave.OnDaveMLSPrepareCommitTransition(data.TransitionID, data.Commit)
+	case *DAVEMLSWelcomeEvent:
+		g.dave.OnDaveMLSWelcome(data.TransitionID, data.Welcome)
 	}
 
 	return true
 }
 
 func (g *gatewayImpl) SendHeartbeat(ctx context.Context) {
-	heartbeat := HeartbeatCommand(time.Now().UnixNano())
+	heartbeat := HeartbeatCommand{
+		Nonce:  uint64(time.Now().UnixNano()),
+		SeqAck: g.seq.Load(),
+	}
 	if err := g.gateway.Send(ctx, &heartbeat); err != nil {
 		g.gateway.SendErrorWrap(err, "heartbeat error")
 		g.gateway.QueueReconnect()
@@ -204,5 +361,5 @@ func (g *gatewayImpl) SendHeartbeat(ctx context.Context) {
 }
 
 func (g *gatewayImpl) Close() error {
-	return nil
+	return g.dave.Close()
 }

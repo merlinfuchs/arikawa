@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/disgoorg/godave"
+	davesession "github.com/thomas-vilte/dave-go/session"
+
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/internal/moreatomic"
@@ -19,14 +22,23 @@ import (
 	"github.com/diamondburned/arikawa/v3/voice/voicegateway"
 )
 
-// Protocol is the encryption protocol that this library uses.
-const Protocol = "xsalsa20_poly1305"
-
 // ErrAlreadyConnecting is returned when the session is already connecting.
 var ErrAlreadyConnecting = errors.New("already connecting")
 
 // ErrCannotSend is an error when audio is sent to a closed channel.
 var ErrCannotSend = errors.New("cannot send audio to closed channel")
+
+// ErrDAVENotReady is returned by Write if the end-to-end encryption of the
+// call didn't become ready in time. The frame isn't sent.
+var ErrDAVENotReady = errors.New("end-to-end encryption is not ready")
+
+// daveReadyTimeout is how long Write waits for the end-to-end encryption of
+// the call to be ready, for example right after joining a channel.
+const daveReadyTimeout = 10 * time.Second
+
+// daveReadyPollInterval is how often Write checks whether the end-to-end
+// encryption is ready while it waits for it.
+const daveReadyPollInterval = 10 * time.Millisecond
 
 // WSTimeout is the duration to wait for a gateway operation including Session
 // to complete before erroring out. This only applies to functions that don't
@@ -92,6 +104,16 @@ type Session struct {
 	WSRetryDelay   time.Duration // 2s
 	WSWaitDuration time.Duration // 5s
 
+	// DAVE creates the DAVE session for the end-to-end encryption of each
+	// voice connection. It defaults to the pure Go implementation of
+	// github.com/thomas-vilte/dave-go. It must be set before joining.
+	DAVE godave.SessionCreateFunc
+
+	// daveBuf is the buffer for frames encrypted by Write, decryptBuf the
+	// one for frames decrypted by ReadPacket.
+	daveBuf    []byte
+	decryptBuf []byte
+
 	// joining determines the behavior of incoming event callbacks (Update).
 	// If this is true, incoming events will just send into Updated channels. If
 	// false, events will trigger a reconnection.
@@ -128,6 +150,7 @@ func NewSessionCustom(ses MainSession, userID discord.UserID) *Session {
 		WSMaxRetry:     2,
 		WSRetryDelay:   2 * time.Second,
 		WSWaitDuration: 5 * time.Second,
+		DAVE:           davesession.CreateFunc(),
 
 		// Set this pair of value in so we never have to nil-check the channel.
 		// We can just assume that it's either closed or connected.
@@ -391,7 +414,7 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	s.ensureClosed()
 
 	ws.WSDebug("Start gateway.")
-	s.gateway = voicegateway.New(s.state)
+	s.gateway = voicegateway.NewWithDAVE(s.state, s.DAVE)
 
 	// Open the voice gateway. The function will block until Ready is received.
 	gwctx, gwcancel := context.WithCancel(context.Background())
@@ -421,7 +444,6 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 }
 
 func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
-	var err error
 	var conn *udp.Connection
 
 	for {
@@ -440,6 +462,11 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 			case *voicegateway.ReadyEvent:
 				ws.WSDebug("Got ready from voice gateway, SSRC:", data.SSRC)
 
+				mode, err := udp.ChooseMode(data.Modes)
+				if err != nil {
+					return err
+				}
+
 				// Prepare the UDP voice connection.
 				conn, err = s.udpManager.Dial(ctx, data.Addr(), data.SSRC)
 				if err != nil {
@@ -451,7 +478,7 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 					Data: voicegateway.SelectProtocolData{
 						Address: conn.GatewayIP,
 						Port:    conn.GatewayPort,
-						Mode:    Protocol,
+						Mode:    mode,
 					},
 				}); err != nil {
 					return fmt.Errorf("failed to send SelectProtocolCommand: %w", err)
@@ -464,8 +491,11 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 
 				ws.WSDebug("Received secret key from voice gateway")
 
+				if err := conn.UseSecret(data.Mode, data.SecretKey); err != nil {
+					return fmt.Errorf("failed to use secret key: %w", err)
+				}
+
 				// We're done.
-				conn.UseSecret(data.SecretKey)
 				return nil
 			}
 
@@ -494,18 +524,121 @@ func (s *Session) Speaking(ctx context.Context, flag voicegateway.SpeakingFlag) 
 	return nil
 }
 
-// Write writes into the UDP voice connection. This method is thread safe as far
-// as calling other methods of Session goes; HOWEVER it is not thread safe to
-// call Write itself concurrently.
+// Write encrypts the Opus frame end-to-end and writes it into the UDP voice
+// connection. While the encryption is still being set up, it waits for it and
+// returns ErrDAVENotReady if it isn't ready in time. This method is thread
+// safe as far as calling other methods of Session goes; HOWEVER it is not
+// thread safe to call Write itself concurrently.
 func (s *Session) Write(b []byte) (int, error) {
-	return s.udpManager.Write(b)
+	s.mut.RLock()
+	gateway := s.gateway
+	s.mut.RUnlock()
+
+	if gateway == nil {
+		return 0, ErrCannotSend
+	}
+
+	dave := gateway.DAVE()
+	if err := waitDAVE(dave); err != nil {
+		return 0, err
+	}
+
+	ready := gateway.Ready()
+	if ready == nil {
+		return 0, ErrCannotSend
+	}
+
+	size := dave.MaxEncryptedFrameSize(len(b))
+	if cap(s.daveBuf) < size {
+		s.daveBuf = make([]byte, size)
+	}
+
+	n, err := dave.Encrypt(ready.SSRC, b, s.daveBuf[:size])
+	if err != nil {
+		return 0, fmt.Errorf("failed to encrypt frame: %w", err)
+	}
+
+	if _, err := s.udpManager.Write(s.daveBuf[:n]); err != nil {
+		return 0, err
+	}
+
+	return len(b), nil
 }
 
-// ReadPacket reads a single packet from the UDP connection. This is NOT at all
-// thread safe, and must be used very carefully. The backing buffer is always
-// reused.
+// daveWaiter is implemented by DAVE sessions that tell a handshake in progress
+// apart from a call that never gets end-to-end encryption, like dave-go's.
+type daveWaiter interface {
+	ShouldHoldFrames() bool
+	WaitReady(context.Context) (time.Duration, error)
+}
+
+// waitDAVE waits up to daveReadyTimeout for the end-to-end encryption of the
+// call if it's still being set up.
+func waitDAVE(dave godave.Session) error {
+	if w, ok := dave.(daveWaiter); ok {
+		if !w.ShouldHoldFrames() {
+			return nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), daveReadyTimeout)
+		defer cancel()
+
+		if _, err := w.WaitReady(ctx); err != nil {
+			return ErrDAVENotReady
+		}
+		return nil
+	}
+
+	deadline := time.Now().Add(daveReadyTimeout)
+	for !dave.Ready() {
+		if time.Now().After(deadline) {
+			return ErrDAVENotReady
+		}
+		time.Sleep(daveReadyPollInterval)
+	}
+	return nil
+}
+
+// ReadPacket reads a single packet from the UDP connection and decrypts its
+// end-to-end encryption. Packets of users that didn't start speaking yet are
+// skipped, since they can't be decrypted. This is NOT at all thread safe, and
+// must be used very carefully. The backing buffer is always reused.
 func (s *Session) ReadPacket() (*udp.Packet, error) {
-	return s.udpManager.ReadPacket()
+	for {
+		p, err := s.udpManager.ReadPacket()
+		if err != nil {
+			return nil, err
+		}
+
+		s.mut.RLock()
+		gateway := s.gateway
+		s.mut.RUnlock()
+
+		if gateway == nil {
+			return p, nil
+		}
+
+		userID := gateway.UserIDBySSRC(p.SSRC())
+		if !userID.IsValid() {
+			continue
+		}
+
+		dave := gateway.DAVE()
+		daveUserID := godave.UserID(userID.String())
+
+		size := dave.MaxDecryptedFrameSize(daveUserID, len(p.Opus))
+		if cap(s.decryptBuf) < size {
+			s.decryptBuf = make([]byte, size)
+		}
+
+		n, err := dave.Decrypt(daveUserID, p.Opus, s.decryptBuf[:size])
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", udp.ErrDecryptionFailed, err)
+		}
+		p.Opus = s.decryptBuf[:n]
+
+		return p, nil
+	}
 }
 
 // Leave disconnects the current voice session from the currently connected

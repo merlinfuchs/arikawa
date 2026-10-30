@@ -15,6 +15,10 @@ import (
 type Codec struct {
 	Unmarshalers OpUnmarshalers
 	Headers      http.Header
+
+	// BinaryUnmarshaler, if not nil, decodes binary messages into an Op. If
+	// it's nil, binary messages are assumed to be zlib-compressed JSON.
+	BinaryUnmarshaler func(r io.Reader) (Op, error)
 }
 
 // NewCodec creates a new default Codec instance.
@@ -30,6 +34,9 @@ func NewCodec(unmarshalers OpUnmarshalers) Codec {
 type codecOp struct {
 	Op
 	Data json.Raw `json:"d,omitempty"`
+	// Seq is the sequence number of the voice gateway, which sends it as
+	// "seq" instead of "s".
+	Seq int64 `json:"seq,omitempty"`
 }
 
 const maxSharedBufferSize = 1 << 15 // 32KB
@@ -60,6 +67,10 @@ func (c Codec) DecodeInto(ctx context.Context, r io.Reader, buf *DecodeBuffer, o
 
 	if err := json.DecodeStream(r, &op); err != nil {
 		return c.send(ctx, out, newErrOp(err, "cannot read JSON stream"))
+	}
+
+	if op.Sequence == 0 {
+		op.Sequence = op.Seq
 	}
 
 	if EnableRawEvents {
