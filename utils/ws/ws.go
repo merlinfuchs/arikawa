@@ -71,6 +71,16 @@ func (ws *Websocket) Dial(ctx context.Context) (<-chan Op, error) {
 // Send sends b over the Websocket with a deadline. It closes the internal
 // Websocket if the Send method errors out.
 func (ws *Websocket) Send(ctx context.Context, b []byte) error {
+	return ws.send(ctx, b, false)
+}
+
+// SendBinary is like Send, but it sends b as a binary message. The connection
+// must implement BinarySender.
+func (ws *Websocket) SendBinary(ctx context.Context, b []byte) error {
+	return ws.send(ctx, b, true)
+}
+
+func (ws *Websocket) send(ctx context.Context, b []byte, binary bool) error {
 	WSDebug("Acquiring the websocket mutex for sending.")
 
 	ws.mutex.Lock()
@@ -87,27 +97,15 @@ func (ws *Websocket) Send(ctx context.Context, b []byte) error {
 
 	WSDebug("Send has passed the rate limiting.")
 
+	if binary {
+		sender, ok := conn.(BinarySender)
+		if !ok {
+			return errors.New("connection cannot send binary messages")
+		}
+		return sender.SendBinary(ctx, b)
+	}
+
 	return conn.Send(ctx, b)
-}
-
-// SendBinary is like Send, but it sends b as a binary message. The connection
-// must implement BinarySender.
-func (ws *Websocket) SendBinary(ctx context.Context, b []byte) error {
-	ws.mutex.Lock()
-	sendLimiter := ws.sendLimiter
-	conn := ws.conn
-	ws.mutex.Unlock()
-
-	sender, ok := conn.(BinarySender)
-	if !ok {
-		return errors.New("connection cannot send binary messages")
-	}
-
-	if err := sendLimiter.Wait(ctx); err != nil {
-		return fmt.Errorf("SendLimiter failed: %w", err)
-	}
-
-	return sender.SendBinary(ctx, b)
 }
 
 // Close closes the websocket connection. It assumes that the Websocket is

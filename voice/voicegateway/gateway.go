@@ -12,13 +12,16 @@ package voicegateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/godave"
+	davesession "github.com/thomas-vilte/dave-go/session"
 
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/utils/ws"
@@ -53,6 +56,11 @@ type Gateway struct {
 	// back to the gateway in heartbeats and resumes.
 	seq atomic.Int64
 
+	// daveSends holds the messages of the DAVE session until they're sent.
+	// The DAVE session calls its callbacks while holding its lock, so they
+	// mustn't wait for the websocket.
+	daveSends chan ws.Event
+
 	mutex     sync.RWMutex
 	ready     *ReadyEvent
 	ssrcUsers map[uint32]discord.UserID
@@ -84,17 +92,17 @@ var DefaultGatewayOpts = ws.GatewayOpts{
 	AlwaysCloseGracefully: true,
 }
 
-// New creates a new voice gateway without end-to-end encryption. Discord
-// rejects voice connections without DAVE support, so this is mostly useful
-// for testing. Use NewWithDAVE instead.
+// New creates a new voice gateway that uses the pure Go DAVE implementation
+// of github.com/thomas-vilte/dave-go for the end-to-end encryption of the
+// call.
 func New(state State) *Gateway {
-	return NewWithDAVE(state, godave.NewNoopSession, slog.New(slog.DiscardHandler))
+	return NewWithDAVE(state, davesession.CreateFunc())
 }
 
 // NewWithDAVE creates a new voice gateway that uses a DAVE session created
 // with createDAVE for the end-to-end encryption of the call. The session is
 // closed once the gateway is closed.
-func NewWithDAVE(state State, createDAVE godave.SessionCreateFunc, logger *slog.Logger) *Gateway {
+func NewWithDAVE(state State, createDAVE godave.SessionCreateFunc) *Gateway {
 	// https://discord.com/developers/docs/topics/voice-connections#establishing-a-voice-websocket-connection
 	endpoint := "wss://" + strings.TrimSuffix(state.Endpoint, ":80") + "/?v=" + Version
 
@@ -109,9 +117,10 @@ func NewWithDAVE(state State, createDAVE godave.SessionCreateFunc, logger *slog.
 	g := &Gateway{
 		gateway:   gw,
 		state:     state,
+		daveSends: make(chan ws.Event, daveSendQueueSize),
 		ssrcUsers: make(map[uint32]discord.UserID),
 	}
-	g.dave = createDAVE(logger, godave.UserID(state.UserID.String()), daveCallbacks{g})
+	g.dave = createDAVE(slog.Default(), godave.UserID(state.UserID.String()), daveCallbacks{g})
 	g.dave.SetChannelID(godave.ChannelID(state.ChannelID))
 
 	return g
@@ -149,13 +158,6 @@ func (g *Gateway) LastError() error {
 
 // Send is a function to send an Op payload to the Gateway.
 func (g *Gateway) Send(ctx context.Context, data ws.Event) error {
-	switch data := data.(type) {
-	case *DAVEMLSKeyPackageCommand:
-		return g.gateway.SendBinary(ctx, marshalBinaryCommand(data.Op(), data.KeyPackage))
-	case *DAVEMLSCommitWelcomeCommand:
-		return g.gateway.SendBinary(ctx, marshalBinaryCommand(data.Op(), data.CommitWelcome))
-	}
-
 	return g.gateway.Send(ctx, data)
 }
 
@@ -177,7 +179,24 @@ func (g *Gateway) Speaking(ctx context.Context, flag SpeakingFlag) error {
 }
 
 func (g *Gateway) Connect(ctx context.Context) <-chan ws.Op {
+	go g.sendDAVE(ctx)
 	return g.gateway.Connect(ctx, (*gatewayImpl)(g))
+}
+
+// sendDAVE sends the messages of the DAVE session in order until ctx is done.
+func (g *Gateway) sendDAVE(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data := <-g.daveSends:
+			sendCtx, cancel := context.WithTimeout(ctx, daveSendTimeout)
+			if err := g.gateway.Send(sendCtx, data); err != nil {
+				ws.WSError(fmt.Errorf("failed to send DAVE message: %w", err))
+			}
+			cancel()
+		}
+	}
 }
 
 var (
@@ -189,20 +208,27 @@ var (
 	ErrMissingForResume = errors.New("missing GuildID, SessionID, or Token for resuming")
 )
 
-// daveSendTimeout is how long the DAVE session's messages to the gateway may
-// take to be sent.
-const daveSendTimeout = 10 * time.Second
+const (
+	// daveSendTimeout is how long the DAVE session's messages to the gateway
+	// may take to be sent.
+	daveSendTimeout = 10 * time.Second
+	// daveSendQueueSize is how many messages of the DAVE session can wait to
+	// be sent.
+	daveSendQueueSize = 16
+)
 
-// daveCallbacks sends the messages of the DAVE session to the gateway.
+// daveCallbacks queues the messages of the DAVE session to the gateway.
 type daveCallbacks struct{ g *Gateway }
 
 var _ godave.Callbacks = daveCallbacks{}
 
 func (c daveCallbacks) send(data ws.Event) error {
-	ctx, cancel := context.WithTimeout(context.Background(), daveSendTimeout)
-	defer cancel()
-
-	return c.g.Send(ctx, data)
+	select {
+	case c.g.daveSends <- data:
+		return nil
+	default:
+		return errors.New("too many DAVE messages waiting to be sent")
+	}
 }
 
 func (c daveCallbacks) SendMLSKeyPackage(keyPackage []byte) error {
@@ -298,11 +324,9 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 		}
 	case *ClientDisconnectEvent:
 		g.mutex.Lock()
-		for ssrc, userID := range g.ssrcUsers {
-			if userID == data.UserID {
-				delete(g.ssrcUsers, ssrc)
-			}
-		}
+		maps.DeleteFunc(g.ssrcUsers, func(_ uint32, userID discord.UserID) bool {
+			return userID == data.UserID
+		})
 		g.mutex.Unlock()
 
 		g.dave.RemoveUser(godave.UserID(data.UserID.String()))

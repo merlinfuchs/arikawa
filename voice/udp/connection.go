@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -32,11 +33,9 @@ var ErrNoSupportedMode = errors.New("no supported encryption mode")
 
 // ChooseMode returns the best of the given modes that this package supports.
 func ChooseMode(modes []string) (string, error) {
-	for _, preferred := range []string{AEADAES256GCMRTPSize, AEADXChaCha20Poly1305RTPSize} {
-		for _, mode := range modes {
-			if mode == preferred {
-				return mode, nil
-			}
+	for _, mode := range []string{AEADAES256GCMRTPSize, AEADXChaCha20Poly1305RTPSize} {
+		if slices.Contains(modes, mode) {
+			return mode, nil
 		}
 	}
 	return "", fmt.Errorf("%w in %v", ErrNoSupportedMode, modes)
@@ -345,13 +344,13 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 			return nil, err
 		}
 
-		if i < packetHeaderSize || c.recvBuf[0]&0xC0 != 0x80 {
+		if i < packetHeaderSize || c.recvPacket.VersionFlags()&0xC0 != 0x80 {
 			continue
 		}
 
-		// Skip RTCP packets. Their packet type overlaps with the marker bit
-		// and the payload type of RTP, see RFC 5761 section 4.
-		if pt := c.recvBuf[1] & 0x7F; pt >= 72 && pt <= 76 {
+		// Skip RTCP packets. Their packet types 192-223 overlap with the
+		// marker bit and payload types 64-95 of RTP, see RFC 5761 section 4.
+		if pt := c.recvPacket.Type() & 0x7F; pt >= 64 && pt <= 95 {
 			continue
 		}
 
@@ -375,7 +374,7 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 		//    https://tools.ietf.org/html/rfc3550#section-5.1
 		//    https://discord.com/developers/docs/topics/voice-connections#transport-encryption-modes
 		//
-		headerSize := packetHeaderSize + 4*int(c.recvBuf[0]&0x0F)
+		headerSize := packetHeaderSize + 4*int(c.recvPacket.VersionFlags()&0x0F)
 
 		// We check VersionFlags (8-bit) for whether or not the 4th bit
 		// (extension) is set. The value of 0x10 is 0b00010000. RFC3550 section
@@ -385,7 +384,7 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 		//    exactly one header extension, with a format defined in Section
 		//    5.3.1.
 		//
-		isExtension := c.recvBuf[0]&0x10 == 0x10
+		isExtension := c.recvPacket.VersionFlags()&0x10 == 0x10
 
 		var extLen int
 		if isExtension {

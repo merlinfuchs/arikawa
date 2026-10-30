@@ -283,7 +283,11 @@ func (state *loopState) handle(ctx context.Context, opCh chan<- Op) error {
 	}
 
 	if t == websocket.BinaryMessage && state.codec.BinaryUnmarshaler != nil {
-		if err := state.codec.DecodeBinaryInto(ctx, r, opCh); err != nil {
+		op, err := state.codec.BinaryUnmarshaler(r)
+		if err != nil {
+			op = newErrOp(err, "cannot decode binary event from gateway")
+		}
+		if err := state.codec.send(ctx, opCh, op); err != nil {
 			return fmt.Errorf("error distributing binary event: %w", err)
 		}
 		return nil

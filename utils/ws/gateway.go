@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding"
 	"errors"
 	"fmt"
 	"slices"
@@ -161,8 +162,20 @@ func (g *Gateway) Opts() *GatewayOpts {
 	return &cpy
 }
 
-// Send is a function to send an Op payload to the Gateway.
+// Send is a function to send an Op payload to the Gateway. Events that
+// implement encoding.BinaryMarshaler are sent as binary messages.
 func (g *Gateway) Send(ctx context.Context, data Event) error {
+	if m, ok := data.(encoding.BinaryMarshaler); ok {
+		WSDebug("sending binary command Op", data.Op())
+
+		b, err := m.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("failed to encode payload: %w", err)
+		}
+
+		return g.ws.SendBinary(ctx, b)
+	}
+
 	op := Op{
 		Code: data.Op(),
 		Type: data.EventType(),
@@ -178,12 +191,6 @@ func (g *Gateway) Send(ctx context.Context, data Event) error {
 
 	// WS should already be thread-safe.
 	return g.ws.Send(ctx, b)
-}
-
-// SendBinary sends b to the Gateway as a binary message.
-func (g *Gateway) SendBinary(ctx context.Context, b []byte) error {
-	WSDebug("sending binary command")
-	return g.ws.SendBinary(ctx, b)
 }
 
 // HasStarted returns true if the gateway event loop is currently spinning.

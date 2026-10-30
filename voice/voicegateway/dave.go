@@ -115,16 +115,18 @@ func UnmarshalBinaryOp(r io.Reader) (ws.Op, error) {
 		ev = &DAVEMLSExternalSenderPackageEvent{ExternalSenderPackage: payload}
 	case 27:
 		ev = &DAVEMLSProposalsEvent{Proposals: payload}
-	case 29, 30:
-		if len(payload) < 2 {
-			return ws.Op{}, ErrBinaryMessageTooShort
+	case 29:
+		transitionID, commit, err := readTransition(payload)
+		if err != nil {
+			return ws.Op{}, err
 		}
-		transitionID := binary.BigEndian.Uint16(payload[0:2])
-		if code == 29 {
-			ev = &DAVEMLSAnnounceCommitTransitionEvent{TransitionID: transitionID, Commit: payload[2:]}
-		} else {
-			ev = &DAVEMLSWelcomeEvent{TransitionID: transitionID, Welcome: payload[2:]}
+		ev = &DAVEMLSAnnounceCommitTransitionEvent{TransitionID: transitionID, Commit: commit}
+	case 30:
+		transitionID, welcome, err := readTransition(payload)
+		if err != nil {
+			return ws.Op{}, err
 		}
+		ev = &DAVEMLSWelcomeEvent{TransitionID: transitionID, Welcome: welcome}
 	default:
 		return ws.Op{}, ws.UnknownEventError{Op: code}
 	}
@@ -134,6 +136,26 @@ func UnmarshalBinaryOp(r io.Reader) (ws.Op, error) {
 		Data:     ev,
 		Sequence: int64(seq),
 	}, nil
+}
+
+// readTransition reads the transition ID that the payload starts with.
+func readTransition(payload []byte) (uint16, []byte, error) {
+	if len(payload) < 2 {
+		return 0, nil, ErrBinaryMessageTooShort
+	}
+	return binary.BigEndian.Uint16(payload[0:2]), payload[2:], nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler, so the command is sent as
+// a binary message.
+func (c *DAVEMLSKeyPackageCommand) MarshalBinary() ([]byte, error) {
+	return marshalBinaryCommand(c.Op(), c.KeyPackage), nil
+}
+
+// MarshalBinary implements encoding.BinaryMarshaler, so the command is sent as
+// a binary message.
+func (c *DAVEMLSCommitWelcomeCommand) MarshalBinary() ([]byte, error) {
+	return marshalBinaryCommand(c.Op(), c.CommitWelcome), nil
 }
 
 // marshalBinaryCommand encodes a binary command to the voice gateway.

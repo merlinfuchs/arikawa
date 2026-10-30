@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -30,12 +29,12 @@ var ErrAlreadyConnecting = errors.New("already connecting")
 var ErrCannotSend = errors.New("cannot send audio to closed channel")
 
 // ErrDAVENotReady is returned by Write if the end-to-end encryption of the
-// call didn't become ready within DAVEReadyTimeout. The frame isn't sent.
+// call didn't become ready in time. The frame isn't sent.
 var ErrDAVENotReady = errors.New("end-to-end encryption is not ready")
 
-// DAVEReadyTimeout is how long Write waits for the end-to-end encryption of
+// daveReadyTimeout is how long Write waits for the end-to-end encryption of
 // the call to be ready, for example right after joining a channel.
-const DAVEReadyTimeout = 10 * time.Second
+const daveReadyTimeout = 10 * time.Second
 
 // daveReadyPollInterval is how often Write checks whether the end-to-end
 // encryption is ready while it waits for it.
@@ -109,9 +108,6 @@ type Session struct {
 	// voice connection. It defaults to the pure Go implementation of
 	// github.com/thomas-vilte/dave-go. It must be set before joining.
 	DAVE godave.SessionCreateFunc
-	// DAVELogger is the logger given to the DAVE sessions. It defaults to
-	// slog.Default().
-	DAVELogger *slog.Logger
 
 	// daveBuf is the buffer for frames encrypted by Write, decryptBuf the
 	// one for frames decrypted by ReadPacket.
@@ -155,7 +151,6 @@ func NewSessionCustom(ses MainSession, userID discord.UserID) *Session {
 		WSRetryDelay:   2 * time.Second,
 		WSWaitDuration: 5 * time.Second,
 		DAVE:           davesession.CreateFunc(),
-		DAVELogger:     slog.Default(),
 
 		// Set this pair of value in so we never have to nil-check the channel.
 		// We can just assume that it's either closed or connected.
@@ -419,7 +414,7 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	s.ensureClosed()
 
 	ws.WSDebug("Start gateway.")
-	s.gateway = voicegateway.NewWithDAVE(s.state, s.DAVE, s.DAVELogger)
+	s.gateway = voicegateway.NewWithDAVE(s.state, s.DAVE)
 
 	// Open the voice gateway. The function will block until Ready is received.
 	gwctx, gwcancel := context.WithCancel(context.Background())
@@ -529,21 +524,11 @@ func (s *Session) Speaking(ctx context.Context, flag voicegateway.SpeakingFlag) 
 	return nil
 }
 
-// DAVEReady returns whether the end-to-end encryption of the call is ready,
-// so that Write can send audio.
-func (s *Session) DAVEReady() bool {
-	s.mut.RLock()
-	gateway := s.gateway
-	s.mut.RUnlock()
-
-	return gateway != nil && gateway.DAVE().Ready()
-}
-
 // Write encrypts the Opus frame end-to-end and writes it into the UDP voice
-// connection. While the encryption is still being set up, it waits up to
-// DAVEReadyTimeout for it and returns ErrDAVENotReady if it isn't ready by
-// then. This method is thread safe as far as calling other methods of Session
-// goes; HOWEVER it is not thread safe to call Write itself concurrently.
+// connection. While the encryption is still being set up, it waits for it and
+// returns ErrDAVENotReady if it isn't ready in time. This method is thread
+// safe as far as calling other methods of Session goes; HOWEVER it is not
+// thread safe to call Write itself concurrently.
 func (s *Session) Write(b []byte) (int, error) {
 	s.mut.RLock()
 	gateway := s.gateway
@@ -554,14 +539,8 @@ func (s *Session) Write(b []byte) (int, error) {
 	}
 
 	dave := gateway.DAVE()
-	if !dave.Ready() {
-		deadline := time.Now().Add(DAVEReadyTimeout)
-		for !dave.Ready() {
-			if time.Now().After(deadline) {
-				return 0, ErrDAVENotReady
-			}
-			time.Sleep(daveReadyPollInterval)
-		}
+	if err := waitDAVE(dave); err != nil {
+		return 0, err
 	}
 
 	ready := gateway.Ready()
@@ -586,38 +565,80 @@ func (s *Session) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// ReadPacket reads a single packet from the UDP connection and decrypts its
-// end-to-end encryption. This is NOT at all thread safe, and must be used very
-// carefully. The backing buffer is always reused.
-func (s *Session) ReadPacket() (*udp.Packet, error) {
-	p, err := s.udpManager.ReadPacket()
-	if err != nil {
-		return nil, err
+// daveWaiter is implemented by DAVE sessions that tell a handshake in progress
+// apart from a call that never gets end-to-end encryption, like dave-go's.
+type daveWaiter interface {
+	ShouldHoldFrames() bool
+	WaitReady(context.Context) (time.Duration, error)
+}
+
+// waitDAVE waits up to daveReadyTimeout for the end-to-end encryption of the
+// call if it's still being set up.
+func waitDAVE(dave godave.Session) error {
+	if w, ok := dave.(daveWaiter); ok {
+		if !w.ShouldHoldFrames() {
+			return nil
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), daveReadyTimeout)
+		defer cancel()
+
+		if _, err := w.WaitReady(ctx); err != nil {
+			return ErrDAVENotReady
+		}
+		return nil
 	}
 
-	s.mut.RLock()
-	gateway := s.gateway
-	s.mut.RUnlock()
+	deadline := time.Now().Add(daveReadyTimeout)
+	for !dave.Ready() {
+		if time.Now().After(deadline) {
+			return ErrDAVENotReady
+		}
+		time.Sleep(daveReadyPollInterval)
+	}
+	return nil
+}
 
-	if gateway == nil {
+// ReadPacket reads a single packet from the UDP connection and decrypts its
+// end-to-end encryption. Packets of users that didn't start speaking yet are
+// skipped, since they can't be decrypted. This is NOT at all thread safe, and
+// must be used very carefully. The backing buffer is always reused.
+func (s *Session) ReadPacket() (*udp.Packet, error) {
+	for {
+		p, err := s.udpManager.ReadPacket()
+		if err != nil {
+			return nil, err
+		}
+
+		s.mut.RLock()
+		gateway := s.gateway
+		s.mut.RUnlock()
+
+		if gateway == nil {
+			return p, nil
+		}
+
+		userID := gateway.UserIDBySSRC(p.SSRC())
+		if !userID.IsValid() {
+			continue
+		}
+
+		dave := gateway.DAVE()
+		daveUserID := godave.UserID(userID.String())
+
+		size := dave.MaxDecryptedFrameSize(daveUserID, len(p.Opus))
+		if cap(s.decryptBuf) < size {
+			s.decryptBuf = make([]byte, size)
+		}
+
+		n, err := dave.Decrypt(daveUserID, p.Opus, s.decryptBuf[:size])
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", udp.ErrDecryptionFailed, err)
+		}
+		p.Opus = s.decryptBuf[:n]
+
 		return p, nil
 	}
-
-	dave := gateway.DAVE()
-	userID := godave.UserID(gateway.UserIDBySSRC(p.SSRC()).String())
-
-	size := dave.MaxDecryptedFrameSize(userID, len(p.Opus))
-	if cap(s.decryptBuf) < size {
-		s.decryptBuf = make([]byte, size)
-	}
-
-	n, err := dave.Decrypt(userID, p.Opus, s.decryptBuf[:size])
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", udp.ErrDecryptionFailed, err)
-	}
-	p.Opus = s.decryptBuf[:n]
-
-	return p, nil
 }
 
 // Leave disconnects the current voice session from the currently connected

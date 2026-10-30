@@ -2,6 +2,7 @@ package voicegateway
 
 import (
 	"bytes"
+	"encoding"
 	"reflect"
 	"testing"
 
@@ -69,8 +70,21 @@ func TestUnmarshalBinaryOpInvalid(t *testing.T) {
 }
 
 func TestMarshalBinaryCommand(t *testing.T) {
-	got := marshalBinaryCommand((&DAVEMLSKeyPackageCommand{}).Op(), []byte{1, 2})
-	if want := []byte{26, 1, 2}; !bytes.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	tests := []struct {
+		cmd  encoding.BinaryMarshaler
+		want []byte
+	}{
+		{&DAVEMLSKeyPackageCommand{KeyPackage: []byte{1, 2}}, []byte{26, 1, 2}},
+		{&DAVEMLSCommitWelcomeCommand{CommitWelcome: []byte{3}}, []byte{28, 3}},
+	}
+
+	for _, test := range tests {
+		got, err := test.cmd.MarshalBinary()
+		if err != nil {
+			t.Fatal("failed to marshal:", err)
+		}
+		if !bytes.Equal(got, test.want) {
+			t.Errorf("got %v, want %v", got, test.want)
+		}
 	}
 }

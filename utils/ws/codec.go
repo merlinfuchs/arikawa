@@ -34,6 +34,9 @@ func NewCodec(unmarshalers OpUnmarshalers) Codec {
 type codecOp struct {
 	Op
 	Data json.Raw `json:"d,omitempty"`
+	// Seq is the sequence number of the voice gateway, which sends it as
+	// "seq" instead of "s".
+	Seq int64 `json:"seq,omitempty"`
 }
 
 const maxSharedBufferSize = 1 << 15 // 32KB
@@ -64,6 +67,10 @@ func (c Codec) DecodeInto(ctx context.Context, r io.Reader, buf *DecodeBuffer, o
 
 	if err := json.DecodeStream(r, &op); err != nil {
 		return c.send(ctx, out, newErrOp(err, "cannot read JSON stream"))
+	}
+
+	if op.Sequence == 0 {
+		op.Sequence = op.Seq
 	}
 
 	if EnableRawEvents {
@@ -101,17 +108,6 @@ func (c Codec) DecodeInto(ctx context.Context, r io.Reader, buf *DecodeBuffer, o
 	}
 
 	return c.send(ctx, out, op.Op)
-}
-
-// DecodeBinaryInto decodes the given binary message using BinaryUnmarshaler
-// and sends it into the Op out channel.
-func (c Codec) DecodeBinaryInto(ctx context.Context, r io.Reader, out chan<- Op) error {
-	op, err := c.BinaryUnmarshaler(r)
-	if err != nil {
-		return c.send(ctx, out, newErrOp(err, "cannot decode binary event from gateway"))
-	}
-
-	return c.send(ctx, out, op)
 }
 
 func (c *Codec) send(ctx context.Context, ch chan<- Op, op Op) error {
