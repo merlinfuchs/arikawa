@@ -38,6 +38,12 @@ type Connection interface {
 	Close(gracefully bool) error
 }
 
+// BinarySender is a Connection that can also send binary messages.
+type BinarySender interface {
+	// SendBinary allows the caller to send bytes as a binary message.
+	SendBinary(context.Context, []byte) error
+}
+
 // Conn is the default Websocket connection. It tries to compresses all payloads
 // using zlib.
 type Conn struct {
@@ -60,7 +66,10 @@ type connMutex struct {
 	cancel context.CancelFunc
 }
 
-var _ Connection = (*Conn)(nil)
+var (
+	_ Connection   = (*Conn)(nil)
+	_ BinarySender = (*Conn)(nil)
+)
 
 // NewConn creates a new default websocket connection with a default dialer.
 func NewConn(codec Codec) *Conn {
@@ -184,6 +193,15 @@ var resetDeadline = time.Time{}
 
 // Send implements Connection.
 func (c *Conn) Send(ctx context.Context, b []byte) error {
+	return c.send(ctx, websocket.TextMessage, b)
+}
+
+// SendBinary implements BinarySender. It sends b as a binary message.
+func (c *Conn) SendBinary(ctx context.Context, b []byte) error {
+	return c.send(ctx, websocket.BinaryMessage, b)
+}
+
+func (c *Conn) send(ctx context.Context, messageType int, b []byte) error {
 	c.mut.Lock()
 	conn := c.conn
 	c.mut.Unlock()
@@ -204,7 +222,7 @@ func (c *Conn) Send(ctx context.Context, b []byte) error {
 			}
 		}
 
-		return conn.WriteMessage(websocket.TextMessage, b)
+		return conn.WriteMessage(messageType, b)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -262,6 +280,13 @@ func (state *loopState) handle(ctx context.Context, opCh chan<- Op) error {
 	t, r, err := state.conn.NextReader()
 	if err != nil {
 		return err
+	}
+
+	if t == websocket.BinaryMessage && state.codec.BinaryUnmarshaler != nil {
+		if err := state.codec.DecodeBinaryInto(ctx, r, opCh); err != nil {
+			return fmt.Errorf("error distributing binary event: %w", err)
+		}
+		return nil
 	}
 
 	if t == websocket.BinaryMessage {

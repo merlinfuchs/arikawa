@@ -15,6 +15,10 @@ import (
 type Codec struct {
 	Unmarshalers OpUnmarshalers
 	Headers      http.Header
+
+	// BinaryUnmarshaler, if not nil, decodes binary messages into an Op. If
+	// it's nil, binary messages are assumed to be zlib-compressed JSON.
+	BinaryUnmarshaler func(r io.Reader) (Op, error)
 }
 
 // NewCodec creates a new default Codec instance.
@@ -97,6 +101,17 @@ func (c Codec) DecodeInto(ctx context.Context, r io.Reader, buf *DecodeBuffer, o
 	}
 
 	return c.send(ctx, out, op.Op)
+}
+
+// DecodeBinaryInto decodes the given binary message using BinaryUnmarshaler
+// and sends it into the Op out channel.
+func (c Codec) DecodeBinaryInto(ctx context.Context, r io.Reader, out chan<- Op) error {
+	op, err := c.BinaryUnmarshaler(r)
+	if err != nil {
+		return c.send(ctx, out, newErrOp(err, "cannot decode binary event from gateway"))
+	}
+
+	return c.send(ctx, out, op)
 }
 
 func (c *Codec) send(ctx context.Context, ch chan<- Op, op Op) error {

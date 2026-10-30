@@ -4,6 +4,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -87,6 +88,26 @@ func (ws *Websocket) Send(ctx context.Context, b []byte) error {
 	WSDebug("Send has passed the rate limiting.")
 
 	return conn.Send(ctx, b)
+}
+
+// SendBinary is like Send, but it sends b as a binary message. The connection
+// must implement BinarySender.
+func (ws *Websocket) SendBinary(ctx context.Context, b []byte) error {
+	ws.mutex.Lock()
+	sendLimiter := ws.sendLimiter
+	conn := ws.conn
+	ws.mutex.Unlock()
+
+	sender, ok := conn.(BinarySender)
+	if !ok {
+		return errors.New("connection cannot send binary messages")
+	}
+
+	if err := sendLimiter.Wait(ctx); err != nil {
+		return fmt.Errorf("SendLimiter failed: %w", err)
+	}
+
+	return sender.SendBinary(ctx, b)
 }
 
 // Close closes the websocket connection. It assumes that the Websocket is

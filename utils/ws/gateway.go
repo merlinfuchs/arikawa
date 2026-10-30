@@ -180,6 +180,12 @@ func (g *Gateway) Send(ctx context.Context, data Event) error {
 	return g.ws.Send(ctx, b)
 }
 
+// SendBinary sends b to the Gateway as a binary message.
+func (g *Gateway) SendBinary(ctx context.Context, b []byte) error {
+	WSDebug("sending binary command")
+	return g.ws.SendBinary(ctx, b)
+}
+
 // HasStarted returns true if the gateway event loop is currently spinning.
 func (g *Gateway) HasStarted() bool {
 	g.outer.Lock()
