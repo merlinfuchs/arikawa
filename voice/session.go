@@ -644,6 +644,16 @@ func (s *Session) ReadPacket() (*udp.Packet, error) {
 // Leave disconnects the current voice session from the currently connected
 // channel.
 func (s *Session) Leave(ctx context.Context) error {
+	return s.close(ctx, true)
+}
+
+// Close closes the voice connection without leaving the channel, so the bot
+// stays in it. Joining the channel again reconnects.
+func (s *Session) Close(ctx context.Context) error {
+	return s.close(ctx, false)
+}
+
+func (s *Session) close(ctx context.Context, leave bool) error {
 	s.mut.Lock()
 	defer s.mut.Unlock()
 
@@ -660,6 +670,10 @@ func (s *Session) Leave(ctx context.Context) error {
 	// If we're already closed.
 	if s.gateway == nil && s.udpManager.IsClosed() {
 		return nil
+	}
+
+	if !leave {
+		return s.cancelGateway(ctx)
 	}
 
 	// Notify Discord that we're leaving.
