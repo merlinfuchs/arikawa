@@ -77,6 +77,10 @@ func init() {
 		func() ws.Event { return new(GuildScheduledEventDeleteEvent) },
 		func() ws.Event { return new(GuildScheduledEventUserAddEvent) },
 		func() ws.Event { return new(GuildScheduledEventUserRemoveEvent) },
+		func() ws.Event { return new(AutoModerationRuleCreateEvent) },
+		func() ws.Event { return new(AutoModerationRuleUpdateEvent) },
+		func() ws.Event { return new(AutoModerationRuleDeleteEvent) },
+		func() ws.Event { return new(AutoModerationActionExecutionEvent) },
 		func() ws.Event { return new(IdentifyCommand) },
 	)
 }
@@ -517,6 +521,32 @@ func (*GuildScheduledEventUserRemoveEvent) Op() ws.OpCode { return dispatchOp }
 // EventType implements Event.
 func (*GuildScheduledEventUserRemoveEvent) EventType() ws.EventType {
 	return "GUILD_SCHEDULED_EVENT_USER_REMOVE"
+}
+
+// Op implements Event. It always returns 0.
+func (*AutoModerationRuleCreateEvent) Op() ws.OpCode { return dispatchOp }
+
+// EventType implements Event.
+func (*AutoModerationRuleCreateEvent) EventType() ws.EventType { return "AUTO_MODERATION_RULE_CREATE" }
+
+// Op implements Event. It always returns 0.
+func (*AutoModerationRuleUpdateEvent) Op() ws.OpCode { return dispatchOp }
+
+// EventType implements Event.
+func (*AutoModerationRuleUpdateEvent) EventType() ws.EventType { return "AUTO_MODERATION_RULE_UPDATE" }
+
+// Op implements Event. It always returns 0.
+func (*AutoModerationRuleDeleteEvent) Op() ws.OpCode { return dispatchOp }
+
+// EventType implements Event.
+func (*AutoModerationRuleDeleteEvent) EventType() ws.EventType { return "AUTO_MODERATION_RULE_DELETE" }
+
+// Op implements Event. It always returns 0.
+func (*AutoModerationActionExecutionEvent) Op() ws.OpCode { return dispatchOp }
+
+// EventType implements Event.
+func (*AutoModerationActionExecutionEvent) EventType() ws.EventType {
+	return "AUTO_MODERATION_ACTION_EXECUTION"
 }
 
 // Op implements Event. It always returns Op 2.

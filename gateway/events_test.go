@@ -87,3 +87,63 @@ func TestRequestGuildMembersCommand(t *testing.T) {
 		}
 	})
 }
+
+func TestAutoModerationActionExecutionEvent(t *testing.T) {
+	const payload = `{
+		"guild_id": "1",
+		"action": {"type": 1, "metadata": {"custom_message": "No invites"}},
+		"rule_id": "2",
+		"rule_trigger_type": 1,
+		"user_id": "3",
+		"channel_id": "4",
+		"alert_system_message_id": "5",
+		"content": "join discord.gg/abc",
+		"matched_keyword": "discord.gg",
+		"matched_content": "discord.gg"
+	}`
+
+	ev := OpUnmarshalers.Lookup(dispatchOp, "AUTO_MODERATION_ACTION_EXECUTION")
+	if ev == nil {
+		t.Fatal("AUTO_MODERATION_ACTION_EXECUTION isn't registered")
+	}
+	got, ok := ev().(*AutoModerationActionExecutionEvent)
+	if !ok {
+		t.Fatalf("registered as %T", ev())
+	}
+	if err := json.Unmarshal([]byte(payload), got); err != nil {
+		t.Fatal("failed to unmarshal:", err)
+	}
+
+	want := AutoModerationActionExecutionEvent{
+		GuildID: 1,
+		Action: discord.AutoModerationAction{
+			Type:     discord.AutoModerationBlockMessage,
+			Metadata: discord.AutoModerationActionMetadata{CustomMessage: "No invites"},
+		},
+		RuleID:               2,
+		RuleTriggerType:      discord.AutoModerationKeyword,
+		UserID:               3,
+		ChannelID:            4,
+		AlertSystemMessageID: 5,
+		Content:              "join discord.gg/abc",
+		MatchedKeyword:       "discord.gg",
+		MatchedContent:       "discord.gg",
+	}
+	if !reflect.DeepEqual(*got, want) {
+		t.Fatalf("got %#v", *got)
+	}
+
+	if EventIntents["AUTO_MODERATION_ACTION_EXECUTION"] != IntentAutoModerationExecution {
+		t.Fatal("AUTO_MODERATION_ACTION_EXECUTION doesn't need IntentAutoModerationExecution")
+	}
+}
+
+func TestAutoModerationRuleTriggerType(t *testing.T) {
+	var rule AutoModerationRuleCreateEvent
+	if err := json.Unmarshal([]byte(`{"id": "1", "name": "Spam", "trigger_type": 3}`), &rule); err != nil {
+		t.Fatal("failed to unmarshal:", err)
+	}
+	if rule.TriggerType != discord.AutoModerationSpam {
+		t.Fatalf("got trigger type %d", rule.TriggerType)
+	}
+}
