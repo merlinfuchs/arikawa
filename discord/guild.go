@@ -3,6 +3,8 @@ package discord
 import (
 	"sort"
 	"time"
+
+	"github.com/diamondburned/arikawa/v3/utils/json"
 )
 
 // https://discord.com/developers/docs/resources/guild#guild-object
@@ -335,7 +337,38 @@ type RoleTags struct {
 	// IntegrationID is the id of the integration this role belongs to.
 	IntegrationID IntegrationID `json:"integration_id,omitempty"`
 	// PremiumSubscriber specifies whether this is the guild's premium subscriber role.
-	PremiumSubscriber bool `json:"premium_subscriber,omitempty"`
+	PremiumSubscriber bool `json:"-"`
+}
+
+// MarshalJSON sends PremiumSubscriber like Discord does, as a null
+// premium_subscriber that is only there when it's true.
+func (t RoleTags) MarshalJSON() ([]byte, error) {
+	type rawTags RoleTags
+	if !t.PremiumSubscriber {
+		return json.Marshal(rawTags(t))
+	}
+
+	return json.Marshal(struct {
+		rawTags
+		PremiumSubscriber *struct{} `json:"premium_subscriber"`
+	}{rawTags: rawTags(t)})
+}
+
+// UnmarshalJSON reads PremiumSubscriber from whether premium_subscriber is
+// there at all, because Discord sends it as null.
+func (t *RoleTags) UnmarshalJSON(b []byte) error {
+	type rawTags RoleTags
+	tags := struct {
+		*rawTags
+		PremiumSubscriber json.Raw `json:"premium_subscriber,omitempty"`
+	}{rawTags: (*rawTags)(t)}
+
+	if err := json.Unmarshal(b, &tags); err != nil {
+		return err
+	}
+
+	t.PremiumSubscriber = tags.PremiumSubscriber != nil
+	return nil
 }
 
 // CreatedAt returns a time object representing when the role was created.
