@@ -329,6 +329,16 @@ func (s *StringSelectInteraction) InteractionType() InteractionDataType {
 func (s *StringSelectInteraction) resp() {}
 func (s *StringSelectInteraction) data() {}
 
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (s *StringSelectInteraction) MarshalJSON() ([]byte, error) {
+	type raw StringSelectInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{s.Type(), (*raw)(s)})
+}
+
 // ChannelSelectInteraction is a channel select component's response.
 type ChannelSelectInteraction struct {
 	CustomID ComponentID `json:"custom_id"`
@@ -348,6 +358,16 @@ func (s *ChannelSelectInteraction) InteractionType() InteractionDataType {
 
 func (s *ChannelSelectInteraction) resp() {}
 func (s *ChannelSelectInteraction) data() {}
+
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (s *ChannelSelectInteraction) MarshalJSON() ([]byte, error) {
+	type raw ChannelSelectInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{s.Type(), (*raw)(s)})
+}
 
 // RoleSelectInteraction is a role select component's response.
 type RoleSelectInteraction struct {
@@ -369,6 +389,16 @@ func (s *RoleSelectInteraction) InteractionType() InteractionDataType {
 func (s *RoleSelectInteraction) resp() {}
 func (s *RoleSelectInteraction) data() {}
 
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (s *RoleSelectInteraction) MarshalJSON() ([]byte, error) {
+	type raw RoleSelectInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{s.Type(), (*raw)(s)})
+}
+
 // UserSelectInteraction is a user select component's response.
 type UserSelectInteraction struct {
 	CustomID ComponentID `json:"custom_id"`
@@ -388,6 +418,16 @@ func (s *UserSelectInteraction) InteractionType() InteractionDataType {
 
 func (s *UserSelectInteraction) resp() {}
 func (s *UserSelectInteraction) data() {}
+
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (s *UserSelectInteraction) MarshalJSON() ([]byte, error) {
+	type raw UserSelectInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{s.Type(), (*raw)(s)})
+}
 
 // MentionableSelectInteraction is a mentionable select component's response.
 type MentionableSelectInteraction struct {
@@ -409,6 +449,16 @@ func (s *MentionableSelectInteraction) InteractionType() InteractionDataType {
 func (s *MentionableSelectInteraction) resp() {}
 func (s *MentionableSelectInteraction) data() {}
 
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (s *MentionableSelectInteraction) MarshalJSON() ([]byte, error) {
+	type raw MentionableSelectInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{s.Type(), (*raw)(s)})
+}
+
 // ButtonInteraction is a button component's response. It is the custom ID of
 // the button within the component tree.
 type ButtonInteraction struct {
@@ -427,6 +477,16 @@ func (b *ButtonInteraction) InteractionType() InteractionDataType {
 }
 
 func (b *ButtonInteraction) data() {}
+
+// MarshalJSON implements json.Marshaler. It adds the component_type that
+// ParseComponentInteraction needs to read the interaction back.
+func (b *ButtonInteraction) MarshalJSON() ([]byte, error) {
+	type raw ButtonInteraction
+	return json.Marshal(struct {
+		Type ComponentType `json:"component_type"`
+		*raw
+	}{b.Type(), (*raw)(b)})
+}
 func (b *ButtonInteraction) resp() {}
 
 // ParseComponentInteraction parses the given bytes as a component response.
