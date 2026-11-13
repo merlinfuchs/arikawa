@@ -1078,3 +1078,66 @@ type GuildScheduledEventUserRemoveEvent struct {
 	// GuildID is the id of where the scheduled event belongs
 	GuildID discord.GuildID `json:"guild_id"`
 }
+
+// AutoModerationRuleCreateEvent is a dispatch event. It needs the
+// IntentAutoModerationConfiguration intent.
+//
+// https://discord.com/developers/docs/events/gateway-events#auto-moderation-rule-create
+type AutoModerationRuleCreateEvent struct {
+	discord.AutoModerationRule
+}
+
+// AutoModerationRuleUpdateEvent is a dispatch event. It needs the
+// IntentAutoModerationConfiguration intent.
+//
+// https://discord.com/developers/docs/events/gateway-events#auto-moderation-rule-update
+type AutoModerationRuleUpdateEvent struct {
+	discord.AutoModerationRule
+}
+
+// AutoModerationRuleDeleteEvent is a dispatch event. It needs the
+// IntentAutoModerationConfiguration intent.
+//
+// https://discord.com/developers/docs/events/gateway-events#auto-moderation-rule-delete
+type AutoModerationRuleDeleteEvent struct {
+	discord.AutoModerationRule
+}
+
+// AutoModerationActionExecutionEvent is a dispatch event.
+//
+// It's sent when AutoMod takes an action, once per action of the rule. It
+// needs the IntentAutoModerationExecution intent, and the bot needs the Manage
+// Server permission.
+//
+// https://discord.com/developers/docs/events/gateway-events#auto-moderation-action-execution
+type AutoModerationActionExecutionEvent struct {
+	// GuildID is the id of the guild in which the action was executed.
+	GuildID discord.GuildID `json:"guild_id"`
+	// Action is the action which was executed.
+	Action discord.AutoModerationAction `json:"action"`
+	// RuleID is the id of the rule which the action belongs to.
+	RuleID discord.AutoModerationRuleID `json:"rule_id"`
+	// RuleTriggerType is the trigger type of the rule which was triggered.
+	RuleTriggerType discord.AutoModerationTriggerType `json:"rule_trigger_type"`
+	// UserID is the id of the user which generated the content which
+	// triggered the rule.
+	UserID discord.UserID `json:"user_id"`
+	// ChannelID is the id of the channel in which the user content was
+	// posted, zero if there's none, like for a member profile.
+	ChannelID discord.ChannelID `json:"channel_id,omitempty"`
+	// MessageID is the id of any user message which the content belongs to.
+	// It's zero if the content was blocked by AutoMod or there's no message.
+	MessageID discord.MessageID `json:"message_id,omitempty"`
+	// AlertSystemMessageID is the id of any system auto moderation messages
+	// posted as a result of this action.
+	AlertSystemMessageID discord.MessageID `json:"alert_system_message_id,omitempty"`
+	// Content is the user-generated text content. It's empty without the
+	// IntentMessageContent intent.
+	Content string `json:"content"`
+	// MatchedKeyword is the word or phrase configured in the rule that
+	// triggered the rule.
+	MatchedKeyword string `json:"matched_keyword"`
+	// MatchedContent is the substring in content that triggered the rule.
+	// It's empty without the IntentMessageContent intent.
+	MatchedContent string `json:"matched_content"`
+}

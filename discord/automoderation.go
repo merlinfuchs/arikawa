@@ -9,12 +9,13 @@ const (
 
 type AutoModerationTriggerType uint32
 
+// Discord doesn't use 2, so the trigger types are numbered by hand.
 const (
-	AutoModerationKeyword AutoModerationTriggerType = 1 + iota
-	AutoModerationSpam
-	AutoModerationKeywordPreset
-	AutoModerationMentionSpam
-	AutoModerationMemberProfile
+	AutoModerationKeyword       AutoModerationTriggerType = 1
+	AutoModerationSpam          AutoModerationTriggerType = 3
+	AutoModerationKeywordPreset AutoModerationTriggerType = 4
+	AutoModerationMentionSpam   AutoModerationTriggerType = 5
+	AutoModerationMemberProfile AutoModerationTriggerType = 6
 )
 
 type AutoModerationKeywordPresetType uint32
@@ -79,7 +80,7 @@ type AutoModerationRule struct {
 	// the rule event type
 	EventType AutoModerationEventType `json:"event_type"`
 	// the rule trigger type
-	TriggerType AutoModerationTriggerType
+	TriggerType AutoModerationTriggerType `json:"trigger_type"`
 	// the rule trigger metadata
 	TriggerMetadata AutoModerationTriggerMetadata `json:"trigger_metadata,omitzero"`
 	// the actions which will execute when the rule is triggered

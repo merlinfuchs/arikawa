@@ -29,6 +29,13 @@ const (
 	IntentGuildScheduledEvents
 )
 
+// Discord skipped some bits, so these intents can't be part of the iota block
+// above.
+const (
+	IntentAutoModerationConfiguration Intents = 1 << 20
+	IntentAutoModerationExecution     Intents = 1 << 21
+)
+
 // IntentGuildBans is an alias to IntentGuildModeration.
 //
 // Deprecated: IntentGuildModeration is the more correct constant to use.
@@ -104,4 +111,10 @@ var EventIntents = map[ws.EventType]Intents{
 	"GUILD_SCHEDULED_EVENT_DELETE":      IntentGuildScheduledEvents,
 	"GUILD_SCHEDULED_EVENT_USER_ADD":    IntentGuildScheduledEvents,
 	"GUILD_SCHEDULED_EVENT_USER_REMOVE": IntentGuildScheduledEvents,
+
+	"AUTO_MODERATION_RULE_CREATE": IntentAutoModerationConfiguration,
+	"AUTO_MODERATION_RULE_UPDATE": IntentAutoModerationConfiguration,
+	"AUTO_MODERATION_RULE_DELETE": IntentAutoModerationConfiguration,
+
+	"AUTO_MODERATION_ACTION_EXECUTION": IntentAutoModerationExecution,
 }
