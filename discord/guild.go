@@ -329,7 +329,33 @@ type Role struct {
 	UnicodeEmoji string `json:"unicode_emoji,omitempty"`
 	// Tags are the RoleTags of this role.
 	Tags RoleTags `json:"tags,omitzero"`
+
+	// Colors are the colors of this role, with a gradient if it has a
+	// secondary color.
+	Colors RoleColors `json:"colors"`
+	// Flags is the role's flags combined as a bitfield.
+	Flags RoleFlags `json:"flags"`
 }
+
+// RoleColors are the colors of a role. Discord also sends the primary color
+// as Role.Color.
+type RoleColors struct {
+	// Primary is the role's color.
+	Primary Color `json:"primary_color"`
+	// Secondary is the second color of a gradient, or NullColor.
+	Secondary Color `json:"secondary_color"`
+	// Tertiary is the third color of a holographic role, or NullColor.
+	Tertiary Color `json:"tertiary_color"`
+}
+
+// RoleFlags is the role's flags combined as a bitfield.
+type RoleFlags uint32
+
+const (
+	// RoleInPrompt means the role can be selected by members in an onboarding
+	// prompt.
+	RoleInPrompt RoleFlags = 1 << 0
+)
 
 type RoleTags struct {
 	// BotID is the id of the bot this role belongs to.
