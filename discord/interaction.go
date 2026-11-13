@@ -538,8 +538,11 @@ type CommandInteractionOptions []CommandInteractionOption
 // CommandInteraction is an application command interaction that Discord sends
 // to us.
 type CommandInteraction struct {
-	ID      CommandID                 `json:"id"`
-	Name    string                    `json:"name"`
+	ID   CommandID `json:"id"`
+	Name string    `json:"name"`
+	// Type is the type of the command: a slash command, or a User or Message
+	// command.
+	Type    CommandType               `json:"type"`
 	Options CommandInteractionOptions `json:"options,omitempty"`
 	// 	GuildID is the id of the guild the command is registered to
 	GuildID GuildID `json:"guild_id,omitempty"`
