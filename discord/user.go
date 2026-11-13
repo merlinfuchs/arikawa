@@ -36,6 +36,23 @@ type User struct {
 	NSFWAllowed option.Bool `json:"nsfw_allowed,omitempty"`
 	Pronouns    string      `json:"pronouns,omitempty"`
 	Bio         string      `json:"bio,omitempty"`
+
+	// PrimaryGuild is the server whose tag the user shows, nil if they
+	// don't show one.
+	PrimaryGuild *PrimaryGuild `json:"primary_guild,omitempty"`
+}
+
+// PrimaryGuild is the server tag a user shows next to their name.
+type PrimaryGuild struct {
+	// IdentityGuildID is the ID of the server, or null.
+	IdentityGuildID GuildID `json:"identity_guild_id"`
+	// IdentityEnabled is whether the user shows the server's tag, nil if
+	// unknown, like after the tag was cleared.
+	IdentityEnabled option.Bool `json:"identity_enabled"`
+	// Tag is the text of the tag, up to 4 characters.
+	Tag string `json:"tag"`
+	// Badge is the hash of the tag's badge.
+	Badge Hash `json:"badge"`
 }
 
 // CreatedAt returns a time object representing when the user was created.
